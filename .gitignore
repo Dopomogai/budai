@@ -1,0 +1,37 @@
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Node tooling (future)
+node_modules/
+dist/
+build/
+out/
+
+# Python tooling (future)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment
+.env
+.env.local
+*.local
+
+# Runtime data — these are produced by consumer repos using budai,
+# never by budai itself. Listed here so that if anyone ever runs
+# the OS against itself for dogfooding, the runtime artifacts stay out.
+.agents/runs/
+.agents/council/
+.agents/messages/
+.agents/stats/
+.agents/index/
