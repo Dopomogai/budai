@@ -72,6 +72,10 @@ If you have 30 minutes, read these seven first — they cover the load-bearing c
 - [`16-skill-versioning.md`](docs/16-skill-versioning.md) — semver, manifest pinning, lockfile
 - [`17-registry-and-sync.md`](docs/17-registry-and-sync.md) — registry layout, librarian sync/publish
 
+### Operations and adoption
+- [`20-permissions-and-security.md`](docs/20-permissions-and-security.md) — permission taxonomy, runner enforcement, threat model
+- [`21-onboarding.md`](docs/21-onboarding.md) — step-by-step adoption guide for an existing repo
+
 ### Reference
 - [`18-implementation-phases.md`](docs/18-implementation-phases.md) — eight-phase build sequence
 - [`19-glossary.md`](docs/19-glossary.md) — canonical terms

@@ -8,7 +8,13 @@ Versioning follows semver per `docs/16-skill-versioning.md`. Skills, roles, work
 
 ## [Unreleased]
 
-Future release. Phase 0 deliverables in progress.
+Phase 0 deliverables in progress. Two design extension docs landed already.
+
+### Added
+
+- `docs/20-permissions-and-security.md` — permission taxonomy, runner enforcement, threat model.
+- `docs/21-onboarding.md` — step-by-step adoption guide for existing repos.
+- README index updated with new "Operations and adoption" section.
 
 ### Planned
 
