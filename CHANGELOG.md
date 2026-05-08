@@ -8,24 +8,42 @@ Versioning follows semver per `docs/16-skill-versioning.md`. Skills, roles, work
 
 ## [Unreleased]
 
-Phase 0 deliverables in progress. Two design extension docs landed already.
+Phase 1 deliverables in progress: manual single-role validation in CanvasOS.
+
+### Planned
+
+- Apply budai to CanvasOS (consumer-side Phase 0): manifest, sync, AGENTS.md, file headers.
+- Manual single-role validation per Phase 1.
+- First synthetic task end-to-end.
+
+## [0.2.0] — 2026-05-09
+
+Phase 0 release: design phase closed plus all base/ content and bin/ CLI scripts.
 
 ### Added
 
 - `docs/20-permissions-and-security.md` — permission taxonomy, runner enforcement, threat model.
 - `docs/21-onboarding.md` — step-by-step adoption guide for existing repos.
-- README index updated with new "Operations and adoption" section.
+- `base/roles/` — five role definition files (planner, implementer, verifier, judge, librarian).
+- `base/skills/` — eight skill files (build-task-bundle, peer-review, audit-docs, run-preflight, capture-evidence, discover-standards, regenerate-index, promote-lesson).
+- `base/workflows/` — four workflow files (ship-feature, fix-bug, refactor, audit-repo).
+- `base/conventions.md` — language-agnostic baseline conventions.
+- `base/permissions.md` — role permission baseline with runner translation.
+- `base/runners/claude-code.md` — Claude Code runner shim spec.
+- `base/templates/` — six templates for consumer repos (AGENTS.md, CLAUDE.md, local-conventions, local-untouchables, local-glossary, local-conventions-recipes).
+- `bin/preflight` — repo-state validation script (Python).
+- `bin/postflight` — post-run validation script (Python).
+- `bin/task` — task management CLI (new, move, list).
+- `bin/agent` — agent dispatch CLI (run --role X --task Y --runner Z).
+- `bin/librarian` — librarian operations CLI (sync, publish, bundle, index, add-headers, sweep).
+- `bin/lib/` — shared Python package (manifest, headers, resolution, runner).
+- `bin/requirements.txt` — Python dependencies.
 
-### Planned
+### Notes
 
-- `base/roles/` — five role definition files
-- `base/skills/` — eight standard skill files (`build-task-bundle`, `peer-review`, `audit-docs`, `run-preflight`, `capture-evidence`, `discover-standards`, `regenerate-index`, `promote-lesson`)
-- `base/workflows/` — four workflow files (`ship-feature`, `fix-bug`, `refactor`, `audit-repo`)
-- `base/runners/claude-code.md` — Claude Code runner shim
-- `base/conventions.md` — language-agnostic baseline
-- `base/permissions.md` — role permission baseline
-- `bin/` — CLI scripts (`task`, `agent`, `librarian`, `preflight`, `postflight`)
-- AGENTS.md / CLAUDE.md template for consumer repos
+- Phase 0 deliverables enable a consumer repo to adopt budai end-to-end. Real validation happens in Phase 1 (manual single-role tests against CanvasOS).
+- Several `bin/librarian` subcommands are placeholders for Phase 1+ (sync, publish, bundle, add-headers). The structural scaffolding is in place; real implementations follow.
+- All scripts respond to `--help` and `--version` and run without error in smoke tests.
 
 ## [0.1.0] — 2026-05-09
 
