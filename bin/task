@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""bin/task — task management CLI.
+
+Subcommands:
+  new <type>             Create a new task interactively.
+  move <id> <status>     Flip a task's status field.
+  list                   List open tasks (kanban-by-frontmatter).
+
+Per docs/11-task-format.md.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+# Add bin/ to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib.manifest import find_repo_root
+
+
+VALID_TYPES = ["feature", "bug", "refactor", "research", "audit"]
+VALID_STATUSES = [
+    "open",
+    "planning",
+    "reviewing-plan",
+    "implementing",
+    "reviewing-result",
+    "done",
+    "abandoned",
+    "failed",
+    "coordinator",
+]
+
+
+def slugify(text: str) -> str:
+    """Convert a title to a kebab-case slug."""
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower())
+    return slug.strip("-")[:50]
+
+
+def next_task_id(tasks_dir: Path) -> int:
+    """Find the next available numeric ID."""
+    existing_ids: set[int] = set()
+    for path in [tasks_dir / "open", tasks_dir / "archive"]:
+        if not path.exists():
+            continue
+        for task_file in path.glob("*.md"):
+            match = re.match(r"^(\d+)", task_file.stem)
+            if match:
+                existing_ids.add(int(match.group(1)))
+    return max(existing_ids, default=0) + 1
+
+
+def cmd_new(repo_root: Path, args: argparse.Namespace) -> int:
+    if args.type not in VALID_TYPES:
+        print(f"Invalid type: {args.type}. Must be one of: {', '.join(VALID_TYPES)}", file=sys.stderr)
+        return 1
+
+    tasks_dir = repo_root / "tasks"
+    tasks_dir.mkdir(exist_ok=True)
+    (tasks_dir / "open").mkdir(exist_ok=True)
+    (tasks_dir / "archive").mkdir(exist_ok=True)
+
+    # Interactive prompts (with defaults)
+    if args.skip_prompts:
+        title = args.title or "Untitled"
+        scope = args.scope or "general"
+        user_story = args.user_story or "TBD"
+        ac_lines: list[str] = args.ac or []
+        fan_out = args.fan_out or 1
+        needs_architect = args.needs_architect if args.needs_architect is not None else True
+        trivial = args.trivial or False
+        depends_on = args.depends_on or []
+        parent = args.parent
+        slug = args.slug or slugify(title)
+    else:
+        title = input(f"Title: ").strip() or "Untitled"
+        scope = input(f"Scope: ").strip() or "general"
+        print(f"User story (As a / I want / so that):")
+        user_story = input("> ").strip() or "TBD"
+        print(f"Acceptance criteria (one per line, blank to finish):")
+        ac_lines = []
+        while True:
+            line = input("> ").strip()
+            if not line:
+                break
+            ac_lines.append(line)
+        fan_out_str = input(f"fan-out [1]: ").strip() or "1"
+        fan_out = int(fan_out_str)
+        needs_architect_str = input(f"needs-architect [yes]: ").strip().lower() or "yes"
+        needs_architect = needs_architect_str in ("y", "yes", "true", "1")
+        trivial_str = input(f"trivial [no]: ").strip().lower() or "no"
+        trivial = trivial_str in ("y", "yes", "true", "1")
+        depends_on_str = input(f"depends-on (comma-separated IDs): ").strip()
+        depends_on = [int(x.strip()) for x in depends_on_str.split(",") if x.strip()] if depends_on_str else []
+        parent = None
+        slug = slugify(title)
+
+    task_id = parent if parent else next_task_id(tasks_dir)
+    if parent:
+        # Sub-task: append a letter
+        parent_subtasks = list(tasks_dir.rglob(f"{parent}*.md"))
+        letter = chr(ord("a") + len([t for t in parent_subtasks if re.match(rf"^{parent}[a-z]", t.stem)]))
+        task_filename = f"{parent}{letter}-{slug}.md"
+        task_id_str = f"{parent}{letter}"
+    else:
+        task_filename = f"{task_id:03d}-{slug}.md"
+        task_id_str = f"{task_id:03d}"
+
+    task_file = tasks_dir / "open" / task_filename
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Build frontmatter
+    fm_lines = [
+        "---",
+        f"id: {task_id_str}",
+        f"title: {title}",
+        f"type: {args.type}",
+        f"scope: {scope}",
+        "status: open",
+        f"fan-out: {fan_out}",
+        f"needs-architect: {str(needs_architect).lower()}",
+        "plan-approved: false",
+        "result-approved: false",
+        f"trivial: {str(trivial).lower()}",
+        f"depends-on: {depends_on}",
+        f"created: {now}",
+        f"updated: {now}",
+    ]
+    if parent:
+        fm_lines.insert(-3, f"parent: {parent}")
+    fm_lines.append("---")
+
+    body = f"""
+
+# Task {task_id_str}: {title}
+
+## Objective
+{user_story}
+
+## User story
+{user_story}
+
+## Acceptance criteria
+"""
+    for i, ac in enumerate(ac_lines, 1):
+        body += f"- AC{i}: {ac}\n"
+    body += """
+## Plan
+
+<!-- Filled in by the Planner -->
+
+## Verdict
+
+<!-- Filled in by the Librarian sweep at archival -->
+"""
+
+    task_file.write_text("\n".join(fm_lines) + body)
+    print(f"\nCreated {task_file.relative_to(repo_root)}\n")
+    return 0
+
+
+def cmd_move(repo_root: Path, args: argparse.Namespace) -> int:
+    if args.status not in VALID_STATUSES:
+        print(f"Invalid status: {args.status}. Must be one of: {', '.join(VALID_STATUSES)}", file=sys.stderr)
+        return 1
+
+    tasks_dir = repo_root / "tasks"
+    matches = list((tasks_dir / "open").glob(f"{args.id}*.md"))
+    if not matches:
+        matches = list((tasks_dir / "archive").glob(f"{args.id}*.md"))
+
+    if not matches:
+        print(f"No task found with id {args.id}", file=sys.stderr)
+        return 1
+    if len(matches) > 1:
+        print(f"Multiple tasks match: {matches}", file=sys.stderr)
+        return 1
+
+    task_file = matches[0]
+    content = task_file.read_text()
+    new_content = re.sub(r"^status:.*$", f"status: {args.status}", content, count=1, flags=re.MULTILINE)
+    task_file.write_text(new_content)
+
+    # Move to archive if status is done/abandoned/failed
+    if args.status in ("done", "abandoned", "failed") and task_file.parent.name == "open":
+        new_path = task_file.parent.parent / "archive" / task_file.name
+        task_file.rename(new_path)
+        task_file = new_path
+
+    print(f"Moved {task_file.relative_to(repo_root)} → status: {args.status}")
+    return 0
+
+
+def cmd_list(repo_root: Path, args: argparse.Namespace) -> int:
+    tasks_dir = repo_root / "tasks" / "open"
+    if not tasks_dir.exists():
+        print("No tasks/open/ directory.")
+        return 0
+
+    by_status: dict[str, list[str]] = {}
+    for task_file in sorted(tasks_dir.glob("*.md")):
+        content = task_file.read_text()
+        status_match = re.search(r"^status:\s*(\S+)", content, re.MULTILINE)
+        title_match = re.search(r"^title:\s*(.+)", content, re.MULTILINE)
+        status = status_match.group(1) if status_match else "unknown"
+        title = title_match.group(1).strip() if title_match else task_file.stem
+        by_status.setdefault(status, []).append(f"{task_file.stem} — {title}")
+
+    print()
+    for status in VALID_STATUSES:
+        if status in by_status:
+            print(f"## {status} ({len(by_status[status])})")
+            for line in by_status[status]:
+                print(f"  - {line}")
+            print()
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="budai task management.")
+    parser.add_argument("--version", action="version", version="budai task 0.1.0")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_new = sub.add_parser("new", help="Create a new task.")
+    p_new.add_argument("type", choices=VALID_TYPES)
+    p_new.add_argument("--skip-prompts", action="store_true")
+    p_new.add_argument("--title")
+    p_new.add_argument("--scope")
+    p_new.add_argument("--user-story")
+    p_new.add_argument("--ac", action="append", default=[])
+    p_new.add_argument("--fan-out", type=int)
+    p_new.add_argument("--needs-architect", type=lambda v: v.lower() in ("yes", "true", "1"))
+    p_new.add_argument("--trivial", action="store_true")
+    p_new.add_argument("--depends-on", type=int, action="append", default=[])
+    p_new.add_argument("--parent", type=int)
+    p_new.add_argument("--slug")
+
+    p_move = sub.add_parser("move", help="Move a task to a different status.")
+    p_move.add_argument("id")
+    p_move.add_argument("status")
+
+    sub.add_parser("list", help="List open tasks.")
+
+    args = parser.parse_args()
+    repo_root = find_repo_root()
+
+    cmds = {"new": cmd_new, "move": cmd_move, "list": cmd_list}
+    return cmds[args.cmd](repo_root, args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

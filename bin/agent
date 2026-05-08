@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""bin/agent — launch an agent instance on a task with a specific role.
+
+Usage:
+  bin/agent run --role <role> --task <id> [--runner <name>] [--tier <tier>]
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+# Add bin/ to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib.manifest import find_repo_root, load_manifest
+from lib.resolution import resolve
+from lib.runner import RunSpec, compose_system_prompt, dispatch_claude_code, make_run_dir
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    repo_root = find_repo_root()
+
+    role_path = resolve(repo_root, "roles", args.role)
+    if role_path is None:
+        print(f"Role not found: {args.role}", file=sys.stderr)
+        print(f"Available roles: {sorted([p.stem for p in (repo_root / '.agents/base/roles').glob('*.md') if (repo_root / '.agents/base/roles').exists()])}", file=sys.stderr)
+        return 1
+
+    runner_name = args.runner or "claude-code"
+    runner_path = resolve(repo_root, "runners", runner_name)
+    if runner_path is None:
+        print(f"Runner not found: {runner_name}", file=sys.stderr)
+        return 1
+
+    tier = args.tier
+    if not tier:
+        manifest = load_manifest(repo_root)
+        tier = manifest.defaults.get("model-default", "sonnet")
+
+    spec = RunSpec(
+        repo_root=repo_root,
+        role_name=args.role,
+        task_id=args.task,
+        runner_name=runner_name,
+        tier=tier,
+    )
+
+    # Compose system prompt
+    system_prompt = compose_system_prompt(spec)
+
+    # Save to temp file
+    run_dir = make_run_dir(spec)
+    prompt_file = run_dir / "system-prompt.md"
+    prompt_file.write_text(system_prompt)
+
+    # Dispatch
+    if runner_name == "claude-code":
+        return dispatch_claude_code(spec, prompt_file, "")
+    else:
+        print(f"Runner not yet implemented: {runner_name}", file=sys.stderr)
+        return 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Launch a budai agent on a task.")
+    parser.add_argument("--version", action="version", version="budai agent 0.1.0")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_run = sub.add_parser("run", help="Run an agent on a task.")
+    p_run.add_argument("--role", required=True, help="Role name (planner, implementer, etc.)")
+    p_run.add_argument("--task", required=True, help="Task ID (e.g., 042 or 042a)")
+    p_run.add_argument("--runner", help="Runner to dispatch (default: claude-code)")
+    p_run.add_argument("--tier", choices=["haiku", "sonnet", "opus"], help="Compute tier override")
+
+    args = parser.parse_args()
+
+    if args.cmd == "run":
+        return cmd_run(args)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

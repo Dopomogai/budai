@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""bin/librarian — librarian operations.
+
+Subcommands:
+  sync           Pull base/ content from registry per manifest.
+  publish        Open a PR against the registry to promote local content.
+  bundle <id>    Build a task bundle.
+  index          Regenerate index files (tree/detailed × md/json).
+  add-headers    Interactive: add headers to source files missing them.
+  sweep          Run audit-docs + regenerate-index + promote-lesson.
+
+Phase 0 baseline. Many subcommands are placeholders that will mature
+during Phases 1-7.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+# Add bin/ to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib.headers import (
+    walk_source,
+    write_detailed_json,
+    write_detailed_md,
+    write_tree_json,
+    write_tree_md,
+)
+from lib.manifest import find_repo_root, load_manifest
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Pull base/ content from the registry per manifest.
+
+    Phase 0 placeholder: prints what it would do. Real implementation
+    pulls from the budai-version tag in dopomogai/budai.
+    """
+    repo_root = find_repo_root()
+    manifest = load_manifest(repo_root)
+
+    print(f"\nbudai sync (Phase 0 placeholder)")
+    print(f"Repo root: {repo_root}")
+    print(f"Manifest: budai-version = {manifest.budai_version}")
+    print(f"  Roles: {manifest.included_roles}")
+    print(f"  Skills: {list(manifest.included_skills.keys())}")
+    print(f"  Workflows: {list(manifest.included_workflows.keys())}")
+    print(f"  Runners: {list(manifest.included_runners.keys())}")
+    print(f"\n  (Would pull content from registry tag {manifest.budai_version} into .agents/base/)")
+    print(f"\n  Real implementation arrives in Phase 6.\n")
+    return 0
+
+
+def cmd_publish(args: argparse.Namespace) -> int:
+    """Open a PR against the registry promoting a local file."""
+    print("\nbudai publish (Phase 6 deliverable; not yet implemented)\n")
+    return 1
+
+
+def cmd_bundle(args: argparse.Namespace) -> int:
+    """Build a task bundle.
+
+    Phase 0 placeholder. Full implementation invokes the
+    build-task-bundle skill via an agent.
+    """
+    repo_root = find_repo_root()
+    print(f"\nbudai bundle for task {args.task_id} (Phase 0 placeholder)")
+    print(f"\n  Would invoke build-task-bundle skill on {args.task_id}.")
+    print(f"  Full implementation requires agent dispatch.\n")
+    return 0
+
+
+def cmd_index(args: argparse.Namespace) -> int:
+    """Regenerate index files."""
+    repo_root = find_repo_root()
+    src_root = repo_root / "src"
+
+    if not src_root.exists():
+        print(f"\nNo src/ directory at {src_root}; nothing to index.\n")
+        return 0
+
+    headers = walk_source([src_root])
+    index_dir = repo_root / ".agents" / "index"
+    index_dir.mkdir(parents=True, exist_ok=True)
+
+    write_tree_md(headers, index_dir / "tree.md")
+    write_tree_json(headers, index_dir / "tree.json")
+    write_detailed_md(headers, index_dir / "detailed.md")
+    write_detailed_json(headers, index_dir / "detailed.json")
+
+    missing = sum(1 for h in headers if not h.has_header)
+
+    print(f"\nbudai index — regenerated")
+    print(f"  Total source files: {len(headers)}")
+    print(f"  With headers: {len(headers) - missing}")
+    print(f"  Missing headers: {missing}")
+    print(f"  Output: {index_dir}/{{tree,detailed}}.{{md,json}}\n")
+    return 0
+
+
+def cmd_add_headers(args: argparse.Namespace) -> int:
+    """Interactive: add headers to source files."""
+    print("\nbudai add-headers (Phase 0 placeholder)")
+    print("\n  Will walk src/ and prompt to add headers per directory.")
+    print("  Phase 1 deliverable; for now, headers are added by hand or")
+    print("  via a separate scripted pass per docs/21-onboarding.md.\n")
+    return 0
+
+
+def cmd_sweep(args: argparse.Namespace) -> int:
+    """Run the full Librarian sweep."""
+    print("\nbudai sweep (Phase 0: index regeneration only)")
+    return cmd_index(args)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="budai Librarian operations.")
+    parser.add_argument("--version", action="version", version="budai librarian 0.1.0")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("sync", help="Pull base/ from registry.")
+    sub.add_parser("publish", help="Promote local content to registry.")
+
+    p_bundle = sub.add_parser("bundle", help="Build a task bundle.")
+    p_bundle.add_argument("task_id")
+
+    sub.add_parser("index", help="Regenerate index files.")
+    sub.add_parser("add-headers", help="Add headers to source files.")
+    sub.add_parser("sweep", help="Full Librarian sweep.")
+
+    args = parser.parse_args()
+
+    cmds = {
+        "sync": cmd_sync,
+        "publish": cmd_publish,
+        "bundle": cmd_bundle,
+        "index": cmd_index,
+        "add-headers": cmd_add_headers,
+        "sweep": cmd_sweep,
+    }
+    return cmds[args.cmd](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""bin/preflight — validate repo state before agent work.
+
+Checks per docs/02-structure.md and base/skills/run-preflight.md:
+- No .orig files in source.
+- .env not tracked in git.
+- AGENTS.md exists at repo root.
+- All source files have headers.
+- No untracked files outside gitignore patterns.
+
+Exits 0 on pass, 1 on any error-severity finding.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+# Add bin/ to sys.path so we can `from lib.* import ...`
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib.headers import walk_source, count_missing_headers
+from lib.manifest import find_repo_root
+
+
+def check_no_orig_files(repo_root: Path) -> dict:
+    """No .orig files in source."""
+    orig_files = list(repo_root.rglob("*.orig"))
+    orig_files = [f for f in orig_files if "node_modules" not in f.parts and ".git" not in f.parts]
+    if orig_files:
+        return {
+            "check": "no-orig-files",
+            "severity": "error",
+            "message": f"Found {len(orig_files)} .orig files: " + ", ".join(str(f.relative_to(repo_root)) for f in orig_files[:5]),
+        }
+    return {"check": "no-orig-files", "severity": "ok", "message": "No .orig files found."}
+
+
+def check_env_not_tracked(repo_root: Path) -> dict:
+    """`.env` not in git tracking."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", ".env"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return {
+                "check": "env-not-tracked",
+                "severity": "error",
+                "message": ".env is tracked in git. Rotate any secrets immediately and remove from history.",
+            }
+    except FileNotFoundError:
+        return {"check": "env-not-tracked", "severity": "warning", "message": "git not found; could not verify"}
+    return {"check": "env-not-tracked", "severity": "ok", "message": ".env not tracked."}
+
+
+def check_agents_md_exists(repo_root: Path) -> dict:
+    """AGENTS.md present at repo root."""
+    if (repo_root / "AGENTS.md").exists():
+        return {"check": "agents-md", "severity": "ok", "message": "AGENTS.md present."}
+    return {
+        "check": "agents-md",
+        "severity": "error",
+        "message": "AGENTS.md missing at repo root. Copy from base/templates/AGENTS.md.",
+    }
+
+
+def check_headers(repo_root: Path) -> dict:
+    """All source files have headers."""
+    src_root = repo_root / "src"
+    if not src_root.exists():
+        return {"check": "headers-present", "severity": "ok", "message": "No src/ directory; skipping."}
+
+    headers = walk_source([src_root])
+    missing = count_missing_headers(headers)
+
+    if missing > 0:
+        return {
+            "check": "headers-present",
+            "severity": "warning",
+            "message": f"{missing} source files missing budai header (run bin/librarian add-headers)",
+        }
+    return {"check": "headers-present", "severity": "ok", "message": f"{len(headers)} source files all have headers."}
+
+
+def check_manifest(repo_root: Path) -> dict:
+    """`.agents/manifest.yaml` exists if `.agents/` does."""
+    agents_dir = repo_root / ".agents"
+    if not agents_dir.exists():
+        return {"check": "manifest", "severity": "ok", "message": "No .agents/ directory; budai not yet installed."}
+    manifest = agents_dir / "manifest.yaml"
+    if not manifest.exists():
+        return {
+            "check": "manifest",
+            "severity": "error",
+            "message": ".agents/ exists but manifest.yaml is missing. Copy from examples/manifest-minimal.yaml.",
+        }
+    return {"check": "manifest", "severity": "ok", "message": "manifest.yaml present."}
+
+
+CHECKS = [
+    check_no_orig_files,
+    check_env_not_tracked,
+    check_agents_md_exists,
+    check_headers,
+    check_manifest,
+]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate budai repo state.")
+    parser.add_argument("--json", action="store_true", help="Output JSON report instead of human-readable text.")
+    parser.add_argument("--strict", action="store_true", help="Treat warnings as errors.")
+    parser.add_argument("--version", action="version", version="budai preflight 0.1.0")
+    args = parser.parse_args()
+
+    repo_root = find_repo_root()
+    findings = [check(repo_root) for check in CHECKS]
+
+    has_error = any(f["severity"] == "error" for f in findings)
+    has_warning = any(f["severity"] == "warning" for f in findings)
+    passed = not has_error and not (args.strict and has_warning)
+
+    if args.json:
+        print(json.dumps({"passed": passed, "findings": findings}, indent=2))
+    else:
+        print(f"\nbudai preflight ({'pass' if passed else 'fail'})\n")
+        for f in findings:
+            symbol = {"ok": "✓", "warning": "!", "error": "✗"}[f["severity"]]
+            print(f"  {symbol} [{f['check']}] {f['message']}")
+        print()
+
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

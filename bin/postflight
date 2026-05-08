@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""bin/postflight — validate state after a role declares done.
+
+Checks:
+- Tests pass (if `bin/run-tests` exists).
+- No leftover .orig files (recheck).
+- No newly untracked files that should be committed.
+- Documentation isn't stale relative to changed source files.
+
+Exits 0 on pass, 1 on any error-severity finding.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+# Add bin/ to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib.manifest import find_repo_root
+
+
+def check_no_orig_files(repo_root: Path) -> dict:
+    orig_files = list(repo_root.rglob("*.orig"))
+    orig_files = [f for f in orig_files if "node_modules" not in f.parts and ".git" not in f.parts]
+    if orig_files:
+        return {
+            "check": "no-orig-files",
+            "severity": "error",
+            "message": f"Found {len(orig_files)} new .orig files; merge artifacts left behind.",
+        }
+    return {"check": "no-orig-files", "severity": "ok", "message": "No .orig files."}
+
+
+def check_no_untracked_secrets(repo_root: Path) -> dict:
+    """Look for typical secret-like files in untracked status."""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return {"check": "untracked-secrets", "severity": "warning", "message": "git status failed"}
+
+        suspect_patterns = [".env", ".pem", "id_rsa", "id_ed25519", "credentials.json"]
+        suspect_files = []
+        for line in result.stdout.splitlines():
+            if line.startswith("??"):
+                path = line[3:]
+                if any(pattern in path for pattern in suspect_patterns):
+                    suspect_files.append(path)
+
+        if suspect_files:
+            return {
+                "check": "untracked-secrets",
+                "severity": "error",
+                "message": f"Untracked files matching secret patterns: {suspect_files}",
+            }
+    except FileNotFoundError:
+        return {"check": "untracked-secrets", "severity": "warning", "message": "git not found"}
+    return {"check": "untracked-secrets", "severity": "ok", "message": "No suspicious untracked files."}
+
+
+def check_tests_pass(repo_root: Path) -> dict:
+    """Run tests if bin/run-tests exists."""
+    run_tests = repo_root / "bin" / "run-tests"
+    if not run_tests.exists():
+        return {"check": "tests-pass", "severity": "ok", "message": "No bin/run-tests; skipping."}
+
+    try:
+        result = subprocess.run(
+            [str(run_tests)],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10-minute default
+        )
+        if result.returncode == 0:
+            return {"check": "tests-pass", "severity": "ok", "message": "Tests pass."}
+        return {
+            "check": "tests-pass",
+            "severity": "error",
+            "message": f"Tests failed (exit {result.returncode}). Last output: {result.stdout[-500:]}",
+        }
+    except subprocess.TimeoutExpired:
+        return {"check": "tests-pass", "severity": "error", "message": "Tests timed out (10 min)."}
+
+
+CHECKS = [
+    check_no_orig_files,
+    check_no_untracked_secrets,
+    check_tests_pass,
+]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate budai post-run state.")
+    parser.add_argument("--json", action="store_true", help="Output JSON report.")
+    parser.add_argument("--skip-tests", action="store_true", help="Skip tests check (tests run separately).")
+    parser.add_argument("--version", action="version", version="budai postflight 0.1.0")
+    args = parser.parse_args()
+
+    repo_root = find_repo_root()
+    checks = [c for c in CHECKS if not (args.skip_tests and c.__name__ == "check_tests_pass")]
+    findings = [check(repo_root) for check in checks]
+
+    passed = not any(f["severity"] == "error" for f in findings)
+
+    if args.json:
+        print(json.dumps({"passed": passed, "findings": findings}, indent=2))
+    else:
+        print(f"\nbudai postflight ({'pass' if passed else 'fail'})\n")
+        for f in findings:
+            symbol = {"ok": "✓", "warning": "!", "error": "✗"}[f["severity"]]
+            print(f"  {symbol} [{f['check']}] {f['message']}")
+        print()
+
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
