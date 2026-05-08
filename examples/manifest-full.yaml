@@ -1,0 +1,110 @@
+# Reference budai manifest exercising every field.
+# Use this as a guide, not a starting point — most repos need a small
+# subset. See manifest-minimal.yaml for the starter shape.
+
+# Registry version. Tagged release of dopomogai/budai.
+budai-version: 0.4.2
+
+# Optional: alternative registry source (e.g., a fork or a private mirror).
+# When omitted, defaults to https://github.com/Dopomogai/budai.
+# registry-source: https://github.com/your-org/budai-fork
+
+# What to pull from the registry into .agents/base/.
+# Each entry can be:
+#   - just a name (uses default version pin from registry)
+#   - name with version pin (^MAJOR.MINOR.PATCH | ~MAJOR.MINOR.PATCH | exact | latest)
+included:
+  roles:
+    - planner: ^1.0.0
+    - implementer: ^1.0.0
+    - verifier: ^1.0.0
+    - judge: ^1.0.0
+    - librarian: ^1.0.0
+
+  skills:
+    - build-task-bundle: ^1.4.0
+    - peer-review: ^1.4.0
+    - audit-docs: ~1.2.5            # patches only
+    - run-preflight: ^1.0.0
+    - capture-evidence: ^1.1.0
+    - regenerate-index: ^1.0.0
+    - promote-lesson: ^1.0.0
+    - discover-standards: ^1.0.0    # run once at onboarding
+
+  workflows:
+    - ship-feature: ^1.2.0
+    - fix-bug: ^1.0.0
+    - refactor: ^1.0.0
+    - audit-repo: ^1.0.0
+
+  runners:
+    - claude-code: ^0.1.0
+    - codex: ^0.1.0                 # for hybrid fan-outs (Phase 8+)
+
+# Conventions and other policy files use overlay merging.
+# Local content is merged with base content; local wins on conflict.
+overrides:
+  conventions: local/conventions.md
+
+# Repo-specific extensions. These never propagate to other repos.
+local-only:
+  skills:
+    - add-widget                    # CanvasOS-specific
+    - add-ipc-channel               # CanvasOS-specific
+  roles: []                         # rare; the five defaults usually cover
+  workflows:
+    - integration-test              # custom workflow for nightly E2E
+
+# Human gates. Two by default; can be customized per workflow.
+human-gates:
+  - end-of-planner
+  - end-of-judge
+
+# Optional auto-approve rules for the gates.
+auto-approve:
+  end-of-planner:
+    when: trivial AND fan-out == 1 AND no-new-adr
+  end-of-judge:
+    when: trivial AND all-ac-passed AND verifier-confidence-high
+
+# Defaults. Per-task overrides go in task frontmatter.
+defaults:
+  fan-out: 1
+  retry-budget: 2
+  bundle-budget: 80000
+  runner: claude-code
+  peer-reviewers: 0
+
+# Optional: per-workflow overrides for the defaults above.
+workflow-defaults:
+  refactor:
+    peer-reviewers: 2
+    fan-out: 1
+  research:
+    fan-out: 3
+    retry-budget: 4
+
+# Where runtime data streams to. Required for cross-repo stats.
+runtime-backend:
+  url: https://backend.dopomogai.com
+  workspace: canvasos
+  auth: keychain                    # keychain | env-var | none
+  retention-days: 365
+
+# Privacy redaction extensions. Built-in patterns (API tokens, SSH paths)
+# are always applied; these extend the list.
+redact:
+  - pattern: "AC-\\d+-INTERNAL"     # internal ticket IDs
+  - pattern: "client@example\\.com"
+
+# Optional: scheduled syncs and sweeps.
+schedule:
+  librarian-sweep: "0 17 * * *"     # daily at 17:00 UTC
+  librarian-sync: "0 9 * * 1"       # weekly Mondays at 09:00 UTC
+
+# Optional: which channels the canvas widget should surface.
+canvas-channels:
+  - tasks
+  - review
+  - ops
+  - escalations

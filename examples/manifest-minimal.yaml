@@ -1,0 +1,42 @@
+# Minimal budai manifest for a new consumer repo.
+# Place this at <your-repo>/.agents/manifest.yaml and adjust budai-version.
+
+# Pin to a specific registry tag. Update via librarian sync, review changes
+# in the lockfile, then commit. Avoid using "latest" in production.
+budai-version: 0.1.0
+
+# What to pull from the registry into .agents/base/.
+# Five default roles, the most-used skills, ship-feature workflow.
+included:
+  roles:
+    - planner
+    - implementer
+    - verifier
+    - judge
+    - librarian
+  skills:
+    - build-task-bundle: ^1.0.0
+    - peer-review: ^1.0.0
+    - audit-docs: ^1.0.0
+    - run-preflight: ^1.0.0
+    - capture-evidence: ^1.0.0
+    - regenerate-index: ^1.0.0
+  workflows:
+    - ship-feature: ^1.0.0
+    - fix-bug: ^1.0.0
+    - audit-repo: ^1.0.0
+  runners:
+    - claude-code: ^0.1.0
+
+# Two human gates: architecture review (after Planner) and final result
+# review (after Judge). Both can auto-approve for tasks marked trivial.
+human-gates:
+  - end-of-planner
+  - end-of-judge
+
+# Workflow defaults. Per-task overrides go in task frontmatter.
+defaults:
+  fan-out: 1
+  retry-budget: 2
+  bundle-budget: 80000
+  runner: claude-code
