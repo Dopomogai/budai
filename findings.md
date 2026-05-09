@@ -12,7 +12,49 @@ When closed as not-actually-a-problem, move to **Dismissed** with a one-line rea
 
 ## Open
 
-(None. All current findings have been promoted to dogfood tasks.)
+### F020 — Runner doesn't honor `registry-source: self` (always looks at `.agents/base/`) [P0]
+
+- **Date:** 2026-05-09
+- **Source:** Pre-flight of budai-on-budai task-004 journey. `python3 bin/agent run --role librarian --task 004` returned `Role not found: librarian / Available roles: []`.
+- **Context:** `bin/lib/resolution.py` resolves base files at `.agents/base/<category>/<name>.md` unconditionally (line 33). But when a repo declares `registry-source: self` in its manifest, the authoritative tree lives at `<repo_root>/base/`, not under `.agents/`. budai itself ships `base/` at repo root via committed history (`f393d82` etc.) with no path under `.agents/base/`. Result: the runner can never find any roles/skills/runners/workflows when budai runs against itself. Worked around for this run by symlinking `.agents/base -> ../base` (gitignored). This is task-011 territory in part (`librarian sync` should populate `.agents/base/`), but the resolution logic also needs a `registry-source: self` branch that points directly at `<repo_root>/base/`.
+- **Proposed fix:** In `bin/lib/resolution.py`, read manifest's `registry-source`; when `self`, look up `<repo_root>/base/<category>/<name>.md` (and optionally still allow `.agents/base/` as a fallback for hybrid setups). Or: have `librarian init` / a future `bin/budai bootstrap` create the symlink/copy automatically as part of self-registration. Either way: stop requiring a manual symlink to dogfood.
+
+### F021 — Worktrees branch from `main` and don't see uncommitted main-worktree state [P0]
+
+- **Date:** 2026-05-09
+- **Source:** budai task-004 journey, Implementer + Verifier role spawns.
+- **Context:** During a journey, the task move (`tasks/todo → tasks/in-progress`), the appended Plan section, the Planner's ADR, and the bundle file are all uncommitted in the main worktree (intentionally — they churn during the run). When the Implementer creates a worktree branched from `main`, it gets a stale view: the task file is still at its committed location with no `## Plan` body, and the bundle and ADR don't exist on its branch. Workaround for this run: instructed each downstream agent to read task body / plan / bundle / ADR from absolute paths to the main worktree. Three sites of "absolute-path-injection" in agent prompts. Without this guidance, agents would silently work off stale inputs.
+- **Proposed fix:** The runner should seed each agent's worktree with the journey inputs before dispatch. Concretely, before calling `dispatch_claude_code`, copy: `<task-file>` (with current uncommitted content), `<bundle-file>`, any ADR(s) referenced by the plan, into `.agents/runs/<run-id>/inputs/` inside the worktree. Then point the agent's "## Your task" addendum at those paths. Alternative: commit the task move + plan to a per-task branch (`task-<id>-coordination`) and create worktrees off that branch instead of `main`. Either approach removes the manual absolute-path-injection.
+
+### F022 — Host UI chip tool used despite explicit prompt-level prohibition (F016 recurrence) [P0]
+
+- **Date:** 2026-05-09
+- **Source:** budai task-004 Verifier role spawn. Verifier emitted `mcp__ccd_session__spawn_task` chip ("a doc-sweep chip has been spawned") despite the prompt explicitly forbidding it.
+- **Context:** F016 (CanvasOS retrospective) proposed prompt-level guidance against host-harness chip tools. This run tested that hypothesis with explicit text in the Verifier's "## Your task" section: "**No host-harness chip tools** for non-AC findings — those go in the verifier report's 'Non-AC findings' section, NOT into Claude UI chips (F016)." The Verifier still used the tool. The same finding was *also* correctly captured in the verifier report and ac-mapping.json, so no information was lost — but the chip is still emitted, still ephemeral, still invisible to budai's workflow. Confirms F016's deeper claim: prompt-level guidance is insufficient.
+- **Proposed fix:** Runner-permission denial. The claude-code runner spec already supports `--allowed-tools`; task-010 (runner permission enforcement) implements it. When that lands, the Verifier (and every other role) should have all `mcp__ccd_session__*` tools omitted from the allow-list. Until then, accept the redundant chip emissions as long as the textual report captures the same finding (which it has in both runs so far). **Promote task-010 from P1 → P0** based on this evidence.
+
+### F023 — Judge can't `bin/task new` for follow-ups when task changes the `bin/task` script [P2]
+
+- **Date:** 2026-05-09
+- **Source:** budai task-004 Judge role spawn — needed to spawn three follow-up tasks (015, 016, 017) but the very script being committed was `bin/task`.
+- **Context:** Chicken-and-egg: invoking the pre-patch `bin/task new` would create the file in `tasks/open/` (the legacy layout), not `tasks/todo/` (the new four-folder layout). Workaround: Judge hand-created the three task files using the same frontmatter shape as task-004. Acceptable for this run; minor friction. Will recur any time a task touches `bin/task` itself or other budai infrastructure used during the journey.
+- **Proposed fix:** Judge runs `bin/task new` from the post-patch working tree (i.e., after `git apply` and commit). Or: runner exposes a "use the patched copy" flag for follow-up spawning. Or: Judge always hand-writes follow-up files (acceptable but defeats `bin/task new` for this case). Lowest-touch fix: document the post-patch invocation pattern in `base/roles/judge.md` so it's part of the role spec.
+
+### F024 — Tests added two zero-byte `__init__.py` scaffolding files beyond plan's literal files-to-touch [P2]
+
+- **Date:** 2026-05-09
+- **Source:** budai task-004 Implementer attempt-A.
+- **Context:** Implementer added `tests/__init__.py` and `tests/bin/__init__.py` to make pytest discover the test file. Defensible (pytest discovery requires them on Python ≥3.3 in some configurations; cleaner with them) and transparent in the writeup. But strictly, scope expanded by 2 zero-byte files beyond the plan's enumerated `files-to-touch`. Either the plan should pre-list test scaffolding files when adding a new test directory, OR the convention should explicitly allow zero-byte `__init__.py` files in this case.
+- **Proposed fix:** Update `base/conventions.md` (or `base/skills/peer-review.md`) with: "Test directory scaffolding (`__init__.py`, `conftest.py`) is in-scope when adding a new test path the plan calls for, even if the plan doesn't enumerate the scaffolding files. Document additions in the writeup." This codifies what the Implementer did and what the Verifier rightly didn't fail on.
+
+### F025 — Manual frontmatter flips, recurrence (F015 still unfixed) [P0]
+
+- **Date:** 2026-05-09
+- **Source:** budai task-004 journey — 7 manual frontmatter edits (5 status flips + `plan-approved` + `result-approved`).
+- **Context:** F015 from CanvasOS journey 1 already captured this. Reaffirmed here: every gate transition in the five-role workflow forces a hand-edit to the task frontmatter, despite the workflow having a deterministic "after role X passes its gate, set status to Y" rule. The agent that just finished its role *could* flip the frontmatter as part of its output, but role specs vary on whether they should (Planner currently flips `planning → reviewing-plan`, Verifier sets attempt status not task status, Judge flips to `reviewing-result`). Cleanup pattern: every role flips on completion if the human gate isn't enforced; auto-approve criteria short-circuit the next status flip in trivial cases.
+- **Proposed fix:** Codify the status transitions in `base/workflows/ship-feature.md` (and other workflow files), and have the runner — not the agent — perform the frontmatter flip when a role's exit conditions are met. This decouples role responsibility (produce artifact + report) from state-machine maintenance (set the next status). Auto-approve criteria for `fan-out: 1 ∧ trivial: true` plus `verifier-passed ∧ all-AC-pass` cases would skip ~half the gates we hit today.
+
+
 
 ## Promoted
 
