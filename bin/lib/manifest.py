@@ -20,6 +20,11 @@ import yaml
 MANIFEST_PATH = ".agents/manifest.yaml"
 LOCK_PATH = ".agents/manifest.lock.yaml"
 
+# Recognized tasks-layout values.  Unknown values cause load_manifest() to
+# raise ValueError so mis-spellings are caught at startup rather than silently
+# defaulting to the wrong folder topology.
+VALID_TASKS_LAYOUTS = ("standard", "legacy-four-folder")
+
 
 @dataclass
 class Manifest:
@@ -33,6 +38,7 @@ class Manifest:
     human_gates: list[str] = field(default_factory=list)
     defaults: dict[str, Any] = field(default_factory=dict)
     runtime_backend: dict[str, Any] | None = None
+    tasks_layout: str = "standard"
 
 
 def load_manifest(repo_root: Path) -> Manifest:
@@ -46,6 +52,13 @@ def load_manifest(repo_root: Path) -> Manifest:
 
     included = data.get("included", {}) or {}
 
+    tasks_layout = data.get("tasks-layout", "standard")
+    if tasks_layout not in VALID_TASKS_LAYOUTS:
+        raise ValueError(
+            f"Unknown tasks-layout: {tasks_layout!r}. "
+            f"Must be one of: {', '.join(VALID_TASKS_LAYOUTS)}"
+        )
+
     return Manifest(
         budai_version=data.get("budai-version", "unknown"),
         included_roles=_normalize_role_list(included.get("roles", [])),
@@ -57,6 +70,7 @@ def load_manifest(repo_root: Path) -> Manifest:
         human_gates=data.get("human-gates", []),
         defaults=data.get("defaults", {}) or {},
         runtime_backend=data.get("runtime-backend"),
+        tasks_layout=tasks_layout,
     )
 
 

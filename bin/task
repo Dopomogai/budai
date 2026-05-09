@@ -4,38 +4,56 @@
 Subcommands:
   new <type>             Create a new task interactively.
   move <id> <status>     Flip a task's status field.
-  list                   List open tasks (kanban-by-frontmatter).
+  list                   List tasks (kanban-by-frontmatter).
 
 Per docs/11-task-format.md.
+Layout is read from .agents/manifest.yaml (tasks-layout field).
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 # Add bin/ to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib.manifest import find_repo_root
+from lib.manifest import find_repo_root, load_manifest
+from lib.task_schema import (
+    VALID_STATUSES,
+    VALID_TYPES,
+    folder_for_status,
+    layout_folders,
+    load_all_tasks,
+    parse_frontmatter,
+    validate_dependencies,
+    validate_frontmatter,
+    validate_transition,
+)
 
 
-VALID_TYPES = ["feature", "bug", "refactor", "research", "audit"]
-VALID_STATUSES = [
-    "open",
-    "planning",
-    "reviewing-plan",
-    "implementing",
-    "reviewing-result",
-    "done",
-    "abandoned",
-    "failed",
-    "coordinator",
-]
+# ---------------------------------------------------------------------------
+# Context: thin carrier so cmd_* functions share manifest-derived state
+# without using globals.
+# ---------------------------------------------------------------------------
 
+@dataclass
+class Context:
+    repo_root: Path
+    layout: str
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def slugify(text: str) -> str:
     """Convert a title to a kebab-case slug."""
@@ -43,28 +61,48 @@ def slugify(text: str) -> str:
     return slug.strip("-")[:50]
 
 
-def next_task_id(tasks_dir: Path) -> int:
-    """Find the next available numeric ID."""
+def next_task_id(tasks_dir: Path, layout: str) -> int:
+    """Find the next available numeric ID by scanning all configured folders."""
     existing_ids: set[int] = set()
-    for path in [tasks_dir / "open", tasks_dir / "archive"]:
-        if not path.exists():
+    for folder in layout_folders(layout):
+        folder_path = tasks_dir / folder
+        if not folder_path.exists():
             continue
-        for task_file in path.glob("*.md"):
+        for task_file in folder_path.glob("*.md"):
             match = re.match(r"^(\d+)", task_file.stem)
             if match:
                 existing_ids.add(int(match.group(1)))
     return max(existing_ids, default=0) + 1
 
 
-def cmd_new(repo_root: Path, args: argparse.Namespace) -> int:
-    if args.type not in VALID_TYPES:
-        print(f"Invalid type: {args.type}. Must be one of: {', '.join(VALID_TYPES)}", file=sys.stderr)
-        return 1
+def _emit_frontmatter(data: dict[str, Any]) -> str:
+    """Serialise a frontmatter dict back to YAML fenced text.
 
-    tasks_dir = repo_root / "tasks"
+    Uses yaml.safe_dump so both 'status:' and 'updated:' are written
+    atomically in a single pass (avoids the two-regex fragility of the
+    original cmd_move).
+    """
+    return "---\n" + yaml.safe_dump(data, default_flow_style=False, sort_keys=False) + "---"
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Subcommands
+# ---------------------------------------------------------------------------
+
+def cmd_new(ctx: Context, args: argparse.Namespace) -> int:
+    tasks_dir = ctx.repo_root / "tasks"
     tasks_dir.mkdir(exist_ok=True)
-    (tasks_dir / "open").mkdir(exist_ok=True)
-    (tasks_dir / "archive").mkdir(exist_ok=True)
+
+    # Ensure all configured folders exist.
+    for folder in layout_folders(ctx.layout):
+        (tasks_dir / folder).mkdir(exist_ok=True)
+
+    # Determine target status from --status flag (default "open").
+    status = args.status
 
     # Interactive prompts (with defaults)
     if args.skip_prompts:
@@ -75,33 +113,33 @@ def cmd_new(repo_root: Path, args: argparse.Namespace) -> int:
         fan_out = args.fan_out or 1
         needs_architect = args.needs_architect if args.needs_architect is not None else True
         trivial = args.trivial or False
-        depends_on = args.depends_on or []
+        depends_on: list[int] = args.depends_on or []
         parent = args.parent
         slug = args.slug or slugify(title)
     else:
-        title = input(f"Title: ").strip() or "Untitled"
-        scope = input(f"Scope: ").strip() or "general"
-        print(f"User story (As a / I want / so that):")
+        title = input("Title: ").strip() or "Untitled"
+        scope = input("Scope: ").strip() or "general"
+        print("User story (As a / I want / so that):")
         user_story = input("> ").strip() or "TBD"
-        print(f"Acceptance criteria (one per line, blank to finish):")
+        print("Acceptance criteria (one per line, blank to finish):")
         ac_lines = []
         while True:
             line = input("> ").strip()
             if not line:
                 break
             ac_lines.append(line)
-        fan_out_str = input(f"fan-out [1]: ").strip() or "1"
+        fan_out_str = input("fan-out [1]: ").strip() or "1"
         fan_out = int(fan_out_str)
-        needs_architect_str = input(f"needs-architect [yes]: ").strip().lower() or "yes"
+        needs_architect_str = input("needs-architect [yes]: ").strip().lower() or "yes"
         needs_architect = needs_architect_str in ("y", "yes", "true", "1")
-        trivial_str = input(f"trivial [no]: ").strip().lower() or "no"
+        trivial_str = input("trivial [no]: ").strip().lower() or "no"
         trivial = trivial_str in ("y", "yes", "true", "1")
-        depends_on_str = input(f"depends-on (comma-separated IDs): ").strip()
+        depends_on_str = input("depends-on (comma-separated IDs): ").strip()
         depends_on = [int(x.strip()) for x in depends_on_str.split(",") if x.strip()] if depends_on_str else []
         parent = None
         slug = slugify(title)
 
-    task_id = parent if parent else next_task_id(tasks_dir)
+    task_id = parent if parent else next_task_id(tasks_dir, ctx.layout)
     if parent:
         # Sub-task: append a letter
         parent_subtasks = list(tasks_dir.rglob(f"{parent}*.md"))
@@ -112,29 +150,46 @@ def cmd_new(repo_root: Path, args: argparse.Namespace) -> int:
         task_filename = f"{task_id:03d}-{slug}.md"
         task_id_str = f"{task_id:03d}"
 
-    task_file = tasks_dir / "open" / task_filename
-    now = datetime.now(timezone.utc).isoformat()
+    now = _now_iso()
 
-    # Build frontmatter
-    fm_lines = [
-        "---",
-        f"id: {task_id_str}",
-        f"title: {title}",
-        f"type: {args.type}",
-        f"scope: {scope}",
-        "status: open",
-        f"fan-out: {fan_out}",
-        f"needs-architect: {str(needs_architect).lower()}",
-        "plan-approved: false",
-        "result-approved: false",
-        f"trivial: {str(trivial).lower()}",
-        f"depends-on: {depends_on}",
-        f"created: {now}",
-        f"updated: {now}",
-    ]
+    # Build frontmatter as a dict so we can validate before writing.
+    fm_data: dict[str, Any] = {
+        "id": task_id_str,
+        "title": title,
+        "type": args.type,
+        "scope": scope,
+        "status": status,
+        "fan-out": fan_out,
+        "needs-architect": needs_architect,
+        "plan-approved": False,
+        "result-approved": False,
+        "trivial": trivial,
+        "depends-on": depends_on,
+        "created": now,
+        "updated": now,
+    }
     if parent:
-        fm_lines.insert(-3, f"parent: {parent}")
-    fm_lines.append("---")
+        fm_data["parent"] = parent
+
+    # Validate frontmatter.
+    fm_errors = validate_frontmatter(fm_data, ctx.layout)
+    if fm_errors:
+        for err in fm_errors:
+            print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    # Validate dependencies.
+    all_tasks = load_all_tasks(ctx.repo_root, ctx.layout)
+    dep_strs = [str(d) for d in depends_on]
+    dep_errors = validate_dependencies(task_id_str, dep_strs, all_tasks)
+    if dep_errors:
+        for err in dep_errors:
+            print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    # Route to the correct folder.
+    target_folder = folder_for_status(status, ctx.layout)
+    task_file = tasks_dir / target_folder / task_filename
 
     body = f"""
 
@@ -160,20 +215,21 @@ def cmd_new(repo_root: Path, args: argparse.Namespace) -> int:
 <!-- Filled in by the Librarian sweep at archival -->
 """
 
-    task_file.write_text("\n".join(fm_lines) + body)
-    print(f"\nCreated {task_file.relative_to(repo_root)}\n")
+    task_file.write_text(_emit_frontmatter(fm_data) + body)
+    print(f"\nCreated {task_file.relative_to(ctx.repo_root)}\n")
     return 0
 
 
-def cmd_move(repo_root: Path, args: argparse.Namespace) -> int:
-    if args.status not in VALID_STATUSES:
-        print(f"Invalid status: {args.status}. Must be one of: {', '.join(VALID_STATUSES)}", file=sys.stderr)
-        return 1
+def cmd_move(ctx: Context, args: argparse.Namespace) -> int:
+    tasks_dir = ctx.repo_root / "tasks"
 
-    tasks_dir = repo_root / "tasks"
-    matches = list((tasks_dir / "open").glob(f"{args.id}*.md"))
-    if not matches:
-        matches = list((tasks_dir / "archive").glob(f"{args.id}*.md"))
+    # Search all configured folders for the task.
+    matches: list[Path] = []
+    for folder in layout_folders(ctx.layout):
+        folder_path = tasks_dir / folder
+        if not folder_path.exists():
+            continue
+        matches.extend(folder_path.glob(f"{args.id}*.md"))
 
     if not matches:
         print(f"No task found with id {args.id}", file=sys.stderr)
@@ -184,43 +240,136 @@ def cmd_move(repo_root: Path, args: argparse.Namespace) -> int:
 
     task_file = matches[0]
     content = task_file.read_text()
-    new_content = re.sub(r"^status:.*$", f"status: {args.status}", content, count=1, flags=re.MULTILINE)
+
+    # Parse existing frontmatter to get old status.
+    fm_data = parse_frontmatter(content)
+    old_status = str(fm_data.get("status", ""))
+
+    # Validate transition.
+    new_status = args.status
+    if new_status not in VALID_STATUSES:
+        print(
+            f"Invalid status: {new_status!r}. Must be one of: {', '.join(VALID_STATUSES)}",
+            file=sys.stderr,
+        )
+        return 1
+
+    trans_errors = validate_transition(old_status, new_status)
+    if trans_errors:
+        for err in trans_errors:
+            print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    # Mutate the frontmatter dict.
+    fm_data["status"] = new_status
+    fm_data["updated"] = _now_iso()
+
+    # Re-validate full frontmatter post-edit.
+    fm_errors = validate_frontmatter(fm_data, ctx.layout)
+    if fm_errors:
+        for err in fm_errors:
+            print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    # Re-validate dependencies (ensure depends-on IDs still resolve).
+    depends_on = fm_data.get("depends-on", [])
+    if not isinstance(depends_on, list):
+        depends_on = []
+    task_id_str = str(fm_data.get("id", ""))
+    dep_strs = [str(d) for d in depends_on]
+    all_tasks = load_all_tasks(ctx.repo_root, ctx.layout)
+    dep_errors = validate_dependencies(task_id_str, dep_strs, all_tasks)
+    if dep_errors:
+        for err in dep_errors:
+            print(f"Error: {err}", file=sys.stderr)
+        return 1
+
+    # Reconstruct file: replace frontmatter block, preserve body.
+    # Split on the closing --- of the frontmatter.
+    parts = content.split("---", 2)
+    body = ("---" + parts[2]) if len(parts) >= 3 else ""
+    new_content = _emit_frontmatter(fm_data) + body
+
+    # Write updated content.
     task_file.write_text(new_content)
 
-    # Move to archive if status is done/abandoned/failed
-    if args.status in ("done", "abandoned", "failed") and task_file.parent.name == "open":
-        new_path = task_file.parent.parent / "archive" / task_file.name
-        task_file.rename(new_path)
+    # Move to the target folder if needed (atomic rename).
+    target_folder = folder_for_status(new_status, ctx.layout)
+    if task_file.parent.name != target_folder:
+        target_dir = tasks_dir / target_folder
+        target_dir.mkdir(exist_ok=True)
+        new_path = target_dir / task_file.name
+        os.replace(task_file, new_path)
         task_file = new_path
 
-    print(f"Moved {task_file.relative_to(repo_root)} → status: {args.status}")
+    print(f"Moved {task_file.relative_to(ctx.repo_root)} → status: {new_status}")
     return 0
 
 
-def cmd_list(repo_root: Path, args: argparse.Namespace) -> int:
-    tasks_dir = repo_root / "tasks" / "open"
-    if not tasks_dir.exists():
-        print("No tasks/open/ directory.")
+def cmd_list(ctx: Context, args: argparse.Namespace) -> int:
+    tasks_dir = ctx.repo_root / "tasks"
+    folders = layout_folders(ctx.layout)
+
+    # Verify at least one folder exists.
+    if not any((tasks_dir / f).exists() for f in folders):
+        print(f"No task folders found under {tasks_dir}.")
         return 0
 
     by_status: dict[str, list[str]] = {}
-    for task_file in sorted(tasks_dir.glob("*.md")):
-        content = task_file.read_text()
-        status_match = re.search(r"^status:\s*(\S+)", content, re.MULTILINE)
-        title_match = re.search(r"^title:\s*(.+)", content, re.MULTILINE)
-        status = status_match.group(1) if status_match else "unknown"
-        title = title_match.group(1).strip() if title_match else task_file.stem
-        by_status.setdefault(status, []).append(f"{task_file.stem} — {title}")
+    folder_order: list[str] = []  # tracks which folders had files
+
+    for folder in folders:
+        folder_path = tasks_dir / folder
+        if not folder_path.exists():
+            continue
+        folder_had_tasks = False
+        for task_file in sorted(folder_path.glob("*.md")):
+            content = task_file.read_text()
+            status_match = re.search(r"^status:\s*(\S+)", content, re.MULTILINE)
+            title_match = re.search(r"^title:\s*(.+)", content, re.MULTILINE)
+            status = status_match.group(1) if status_match else "unknown"
+            title = title_match.group(1).strip() if title_match else task_file.stem
+            by_status.setdefault(status, []).append(f"{task_file.stem} — {title}")
+            folder_had_tasks = True
+        if folder_had_tasks:
+            folder_order.append(folder)
 
     print()
-    for status in VALID_STATUSES:
-        if status in by_status:
-            print(f"## {status} ({len(by_status[status])})")
-            for line in by_status[status]:
-                print(f"  - {line}")
-            print()
+
+    if ctx.layout == "legacy-four-folder":
+        # Show per-folder section headers for the human view.
+        for folder in folders:
+            folder_path = tasks_dir / folder
+            if not folder_path.exists():
+                continue
+            # Collect tasks that land in this folder per the mapping.
+            statuses_in_folder = [
+                s for s in VALID_STATUSES
+                if folder_for_status(s, ctx.layout) == folder
+            ]
+            folder_tasks: list[str] = []
+            for status in statuses_in_folder:
+                folder_tasks.extend(by_status.get(status, []))
+            if folder_tasks:
+                print(f"### {folder} ({len(folder_tasks)})")
+                for line in folder_tasks:
+                    print(f"  - {line}")
+                print()
+    else:
+        # Standard layout: group by status in logical order.
+        for status in VALID_STATUSES:
+            if status in by_status:
+                print(f"## {status} ({len(by_status[status])})")
+                for line in by_status[status]:
+                    print(f"  - {line}")
+                print()
+
     return 0
 
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="budai task management.")
@@ -240,18 +389,26 @@ def main() -> int:
     p_new.add_argument("--depends-on", type=int, action="append", default=[])
     p_new.add_argument("--parent", type=int)
     p_new.add_argument("--slug")
+    p_new.add_argument(
+        "--status",
+        choices=VALID_STATUSES,
+        default="open",
+        help="Initial status for the new task (default: open).",
+    )
 
     p_move = sub.add_parser("move", help="Move a task to a different status.")
     p_move.add_argument("id")
     p_move.add_argument("status")
 
-    sub.add_parser("list", help="List open tasks.")
+    sub.add_parser("list", help="List tasks.")
 
     args = parser.parse_args()
     repo_root = find_repo_root()
+    manifest = load_manifest(repo_root)
+    ctx = Context(repo_root=repo_root, layout=manifest.tasks_layout)
 
     cmds = {"new": cmd_new, "move": cmd_move, "list": cmd_list}
-    return cmds[args.cmd](repo_root, args)
+    return cmds[args.cmd](ctx, args)
 
 
 if __name__ == "__main__":
