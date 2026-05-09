@@ -1,0 +1,47 @@
+# budai dogfood manifest.
+# This repo is the registry, so base content is sourced from the repo itself.
+
+budai-version: 0.2.0
+registry-source: self
+tasks-layout: legacy-four-folder
+src-roots:
+  - bin
+
+included:
+  roles:
+    - planner: ^1.0.0
+    - implementer: ^1.0.0
+    - verifier: ^1.0.0
+    - judge: ^1.0.0
+    - librarian: ^1.0.0
+  skills:
+    - build-task-bundle: ^1.0.0
+    - peer-review: ^1.0.0
+    - audit-docs: ^1.0.0
+    - run-preflight: ^1.0.0
+    - capture-evidence: ^1.0.0
+    - regenerate-index: ^1.0.0
+    - promote-lesson: ^1.0.0
+    - discover-standards: ^1.0.0
+  workflows:
+    - ship-feature: ^1.0.0
+    - fix-bug: ^1.0.0
+    - refactor: ^1.0.0
+    - audit-repo: ^1.0.0
+  runners:
+    - claude-code: ^0.1.0
+
+local-only:
+  skills: []
+  roles: []
+  workflows: []
+
+human-gates:
+  - end-of-planner
+  - end-of-judge
+
+defaults:
+  fan-out: 1
+  retry-budget: 2
+  bundle-budget: 80000
+  runner: claude-code
