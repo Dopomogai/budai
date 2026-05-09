@@ -43,5 +43,5 @@ human-gates:
 defaults:
   fan-out: 1
   retry-budget: 2
-  bundle-budget: 80000
+  bundle-budget: 84000
   runner: claude-code
