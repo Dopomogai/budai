@@ -19,13 +19,6 @@ When closed as not-actually-a-problem, move to **Dismissed** with a one-line rea
 - **Context:** Fast-track skips the Planner, so the Implementer is the only role that sees the change set. For mechanical fixes the task body's enumerated files are usually sufficient. But when a fix changes a function signature, every caller becomes an implicit dependency that the task body may not have listed. The Implementer caught this on task-020; on a more complex change it might miss callers silently.
 - **Proposed fix:** When task-019's `base/workflows/fast-track.md` lands, add a step to the Implementer flow: "If your change alters a public function signature, scan the codebase for callers and update them; flag the scope expansion in your writeup. If callers are non-trivial to update, escalate to medium-track (Planner + Implementer + Verifier) instead." Or: only allow fast-track when `trivial: true` is set, where signature changes shouldn't happen.
 
-### F021 — Worktrees branch from `main` and don't see uncommitted main-worktree state [P0]
-
-- **Date:** 2026-05-09
-- **Source:** budai task-004 journey, Implementer + Verifier role spawns.
-- **Context:** During a journey, the task move (`tasks/todo → tasks/in-progress`), the appended Plan section, the Planner's ADR, and the bundle file are all uncommitted in the main worktree (intentionally — they churn during the run). When the Implementer creates a worktree branched from `main`, it gets a stale view: the task file is still at its committed location with no `## Plan` body, and the bundle and ADR don't exist on its branch. Workaround for this run: instructed each downstream agent to read task body / plan / bundle / ADR from absolute paths to the main worktree. Three sites of "absolute-path-injection" in agent prompts. Without this guidance, agents would silently work off stale inputs.
-- **Proposed fix:** The runner should seed each agent's worktree with the journey inputs before dispatch. Concretely, before calling `dispatch_claude_code`, copy: `<task-file>` (with current uncommitted content), `<bundle-file>`, any ADR(s) referenced by the plan, into `.agents/runs/<run-id>/inputs/` inside the worktree. Then point the agent's "## Your task" addendum at those paths. Alternative: commit the task move + plan to a per-task branch (`task-<id>-coordination`) and create worktrees off that branch instead of `main`. Either approach removes the manual absolute-path-injection.
-
 ### F022 — Host UI chip tool used despite explicit prompt-level prohibition (F016 recurrence) [P0]
 
 - **Date:** 2026-05-09
@@ -64,6 +57,13 @@ When closed as not-actually-a-problem, move to **Dismissed** with a one-line rea
 
 
 ## Promoted
+
+### F021 — Worktrees branch from `main` and don't see uncommitted main-worktree state [P0] → task-021
+
+- **Date:** 2026-05-09
+- **Source:** budai task-004 journey, Implementer + Verifier role spawns.
+- **Context:** During a journey, the task move (`tasks/todo → tasks/in-progress`), the appended Plan section, the Planner's ADR, and the bundle file are all uncommitted in the main worktree (intentionally — they churn during the run). When the Implementer creates a worktree branched from `main`, it gets a stale view: the task file is still at its committed location with no `## Plan` body, and the bundle and ADR don't exist on its branch. Workaround for this run: instructed each downstream agent to read task body / plan / bundle / ADR from absolute paths to the main worktree. Three sites of "absolute-path-injection" in agent prompts. Without this guidance, agents would silently work off stale inputs.
+- **Proposed fix:** The runner should seed each agent's worktree with the journey inputs before dispatch. Concretely, before calling `dispatch_claude_code`, copy: `<task-file>` (with current uncommitted content), `<bundle-file>`, any ADR(s) referenced by the plan, into `.agents/runs/<run-id>/inputs/` inside the worktree. Then point the agent's "## Your task" addendum at those paths. Alternative: commit the task move + plan to a per-task branch (`task-<id>-coordination`) and create worktrees off that branch instead of `main`. Either approach removes the manual absolute-path-injection.
 
 ### F020 — Runner doesn't honor `registry-source: self` (always looks at `.agents/base/`) [P0] → task-020
 

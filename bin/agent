@@ -40,12 +40,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not tier:
         tier = manifest.defaults.get("model-default", "sonnet")
 
+    worktree = Path(args.worktree).resolve() if args.worktree else None
+    prior_attempt_dir = Path(args.prior_attempt_dir).resolve() if args.prior_attempt_dir else None
+
     spec = RunSpec(
         repo_root=repo_root,
         role_name=args.role,
         task_id=args.task,
         runner_name=runner_name,
         tier=tier,
+        worktree=worktree,
+        prior_attempt_dir=prior_attempt_dir,
     )
 
     # Compose system prompt
@@ -74,6 +79,14 @@ def main() -> int:
     p_run.add_argument("--task", required=True, help="Task ID (e.g., 042 or 042a)")
     p_run.add_argument("--runner", help="Runner to dispatch (default: claude-code)")
     p_run.add_argument("--tier", choices=["haiku", "sonnet", "opus"], help="Compute tier override")
+    p_run.add_argument(
+        "--worktree",
+        help="Path to an already-created git worktree for the agent (default: repo root)",
+    )
+    p_run.add_argument(
+        "--prior-attempt-dir",
+        help="Directory containing a previous Verifier's failure.md for retry dispatch",
+    )
 
     args = parser.parse_args()
 
