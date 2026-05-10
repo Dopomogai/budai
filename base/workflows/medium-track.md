@@ -8,7 +8,7 @@ peer-reviewers: 0
 stability: experimental
 roles: [planner, implementer, verifier]
 entry-criteria:
-  - needs-architect: true AND fan-out: 1 AND files-to-touch enumerable from task body
+  - "needs-architect: true AND fan-out: 1 AND files-to-touch enumerable from task body"
   - "OR: complexity: medium — task shape is known, but plan-then-implement-then-verify cadence is warranted"
 exit-criteria:
   - plan present in task body (appended by Planner)
