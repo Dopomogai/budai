@@ -20,6 +20,7 @@ from .resolution import _base_dir, list_available, resolve
 from . import journey_state
 from .workflow_schema import WorkflowSpec, parse_workflow_file, validate_workflow_spec
 from .task_schema import parse_frontmatter
+from .transitions import flip_for_role, TransitionDecision
 
 
 # Tier → model ID mapping for claude-code runner
@@ -266,10 +267,10 @@ def dispatch_roles(
     - Consults workflow.gate_rules[role] to determine gate mode.
     - Phase 0: prints "would dispatch <role> with gate <mode>" rather than
       spawning a real subprocess (real dispatch waits for task-009).
-
-    Raises:
-        ValueError: If a role in workflow.roles has no corresponding gate_rules
-            entry and the lookup is required.
+    - Calls flip_for_role after each role to apply or halt the transition
+      per gate-rules (task-022). Phase 0 passes role_exit_code=0 (simulated
+      success); when task-009 lands real dispatch, role_exit_code will be
+      the real subprocess exit code — a one-line change at that point.
 
     Args:
         spec: RunSpec describing the task and runner.
@@ -277,11 +278,45 @@ def dispatch_roles(
         manifest: Already-loaded Manifest (determines tasks_layout).
 
     Returns:
-        Exit code (0 = success).
+        Exit code (0 = success, 1 = role failed).
     """
+    run_dir = make_run_dir(spec)
+
     for role in workflow.roles:
         gate_mode = workflow.gate_rules.get(role, "human")
         print(f"[runner] would dispatch {role} with gate {gate_mode}")
+
+        decision = flip_for_role(
+            spec=spec,
+            workflow=workflow,
+            role=role,
+            role_exit_code=0,
+            run_dir=run_dir,
+            manifest=manifest,
+        )
+
+        if decision.decision == "role-failed":
+            print(
+                f"[runner] Role {role} failed; "
+                f"check run artifacts at {run_dir}"
+            )
+            return 1
+        elif decision.decision == "human-required":
+            print(
+                f"[runner] Halt at {role}; "
+                f"review artifact at {run_dir}; "
+                f"run: {decision.halted_reason}"
+            )
+            return 0
+        else:
+            # decision starts with "auto" — flipped successfully.
+            prev = decision.prev_status
+            new = decision.new_status
+            print(
+                f"[runner] Auto-flipped {spec.task_id}: "
+                f"{prev} → {new} (gate {gate_mode})"
+            )
+
     return 0
 
 

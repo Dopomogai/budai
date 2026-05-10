@@ -365,37 +365,78 @@ def test_resolve_workflow_name_precedence(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def test_workflow_dispatch_order_matches_frontmatter(tmp_path: Path, capsys):
-    """dispatch_roles prints roles in the order declared in workflow.roles."""
+    """dispatch_roles dispatches roles in order; halts at first human gate.
+
+    Updated for task-022: dispatch_roles now calls flip_for_role after each
+    role. A "human" gate on the first role halts after printing that role's
+    "would dispatch" line. Uses real role names (from ROLE_EXIT_STATUS) with
+    a valid task fixture so apply_transition can be called safely.
+    """
+    import textwrap
     repo = _setup_repo(tmp_path)
     manifest = _make_manifest()
 
+    # Create a valid task file so flip_for_role can read/write it.
+    tasks_dir = repo / "tasks"
+    in_progress_dir = tasks_dir / "in-progress"
+    in_progress_dir.mkdir(parents=True, exist_ok=True)
+    (tasks_dir / "todo").mkdir(exist_ok=True)
+    (tasks_dir / "done").mkdir(exist_ok=True)
+    (tasks_dir / "backlog").mkdir(exist_ok=True)
+    (in_progress_dir / "001-alpha-task.md").write_text(
+        textwrap.dedent("""\
+            ---
+            id: '001'
+            title: Alpha task
+            type: feature
+            scope: test
+            status: planning
+            fan-out: 1
+            needs-architect: true
+            plan-approved: false
+            result-approved: false
+            trivial: false
+            depends-on: []
+            created: 2026-01-01T00:00:00+00:00
+            updated: 2026-01-01T00:00:00+00:00
+            ---
+
+            # Task 001
+        """),
+        encoding="utf-8",
+    )
+
     from lib.workflow_schema import WorkflowSpec
 
+    # planner: human — halts after first role (planning → halt).
+    # implementer/judge: auto — would continue if planner were auto.
+    # This tests that (1) "would dispatch planner" is printed, (2) halt
+    # message is printed, (3) function returns 0.
     wf = WorkflowSpec(
         name="test-wf",
         version="1.0.0",
-        roles=["alpha", "beta", "gamma"],
-        gate_rules={"alpha": "auto", "beta": "human", "gamma": "auto"},
+        roles=["planner", "implementer", "judge"],
+        gate_rules={"planner": "human", "implementer": "auto", "judge": "auto"},
     )
 
     spec = RunSpec(
         repo_root=repo,
-        role_name="alpha",
+        role_name="planner",
         task_id="001",
     )
 
     exit_code = dispatch_roles(spec, wf, manifest)
 
+    # human gate at planner returns 0 (halt, not error).
     assert exit_code == 0
 
     captured = capsys.readouterr()
-    lines = [l for l in captured.out.splitlines() if "would dispatch" in l]
+    dispatch_lines = [l for l in captured.out.splitlines() if "would dispatch" in l]
 
-    assert len(lines) == 3
-    assert "alpha" in lines[0]
-    assert "beta" in lines[1]
-    assert "gamma" in lines[2]
+    # Only planner dispatched before halt.
+    assert len(dispatch_lines) == 1
+    assert "planner" in dispatch_lines[0]
+    assert "human" in dispatch_lines[0]
 
-    # Gate modes appear in output
-    assert "auto" in lines[0]
-    assert "human" in lines[1]
+    # Halt message should be present.
+    assert "Halt at planner" in captured.out

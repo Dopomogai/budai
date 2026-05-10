@@ -56,12 +56,6 @@ When closed as not-actually-a-problem, move to **Dismissed** with a one-line rea
 - **Context:** Two related problems. (a) Claude Code's per-tool prompts hit the user 20+ times per journey for routine local ops (`git status`, `mkdir`, `python3 bin/task`, `mv`, etc.). Each prompt costs context-switch time and burns the user's patience; the journey wall-clock for task-004 was 1h 21m, of which ~30 minutes was approvals + context-shuffle on top of ~50 minutes of pure agent compute. (b) `Bash(git push *)` had silently accumulated in `~/Documents/GitHub/CanvasOS/.claude/settings.local.json` from a prior session, so when the journey 2 retrospective committed and pushed, no prompt fired. The user expected a confirmation; the absence was a real surprise. Even when push is in an "approved plan," it is the highest-blast-radius action and should always re-confirm in real time.
 - **Proposed fix:** Two layers. (1) Per-project `.claude/settings.local.json` with **granular allow patterns** for routine local operations and `git push` deliberately *not listed* (falls through to default-ask behavior). **Three Claude Code permission learnings discovered during journey 3:** (a) `deny` is absolute — it blocks entirely with no prompt option, so it's wrong for "ask on this" intent. (b) `allow` patterns are matched first; if a broad pattern like `Bash(git*)` matches a command, `deny` is never consulted, so `Bash(git*)` in allow + `Bash(git push*)` in deny will silently auto-allow push. The fix: list specific git subcommands in allow (`Bash(git status*)`, `Bash(git add*)`, `Bash(git commit*)`, etc.) and omit push. (c) Settings don't reload mid-session — Claude Code restart is needed for changes to take effect. Document this in any future onboarding skill. Both budai and CanvasOS now ship the corrected template at `.claude/settings.local.json` (gitignored — local override). (2) Within budai's own workflow, finding F025 (auto-flip frontmatter on role completion) closes the other half of the approval volume — gate flips become runner-internal, not human-typed.
 
-### F025 — Manual frontmatter flips, recurrence (F015 still unfixed) [P0]
-
-- **Date:** 2026-05-09
-- **Source:** budai task-004 journey — 7 manual frontmatter edits (5 status flips + `plan-approved` + `result-approved`).
-- **Context:** F015 from CanvasOS journey 1 already captured this. Reaffirmed here: every gate transition in the five-role workflow forces a hand-edit to the task frontmatter, despite the workflow having a deterministic "after role X passes its gate, set status to Y" rule. The agent that just finished its role *could* flip the frontmatter as part of its output, but role specs vary on whether they should (Planner currently flips `planning → reviewing-plan`, Verifier sets attempt status not task status, Judge flips to `reviewing-result`). Cleanup pattern: every role flips on completion if the human gate isn't enforced; auto-approve criteria short-circuit the next status flip in trivial cases.
-- **Proposed fix:** Codify the status transitions in `base/workflows/ship-feature.md` (and other workflow files), and have the runner — not the agent — perform the frontmatter flip when a role's exit conditions are met. This decouples role responsibility (produce artifact + report) from state-machine maintenance (set the next status). Auto-approve criteria for `fan-out: 1 ∧ trivial: true` plus `verifier-passed ∧ all-AC-pass` cases would skip ~half the gates we hit today.
 
 
 
@@ -210,7 +204,14 @@ When closed as not-actually-a-problem, move to **Dismissed** with a one-line rea
   - `task-001-fix-topbar-visibility`: Add `isTopTabBarVisible` (default `true`) and `setTopTabBarVisible(value: boolean)` to `CanvasStore` interface + implementation. Drop the `(state: any)` cast at call sites. (Folds in latent bug #1 from the Librarian's notes.)
   - `task-002-add-minimap`: Render `<MiniMap />` from `@xyflow/react` inside `<ReactFlow>` children in `SpatialCanvas.tsx`. Style it per existing canvas chrome.
 
-### F015 — Status transitions, gate flips, worktree management should be runner-mechanical, not human-typed [P0]
+### F025 — Manual frontmatter flips, recurrence (F015 still unfixed) [P0] → task-022
+
+- **Date:** 2026-05-09
+- **Source:** budai task-004 journey — 7 manual frontmatter edits (5 status flips + `plan-approved` + `result-approved`).
+- **Context:** F015 from CanvasOS journey 1 already captured this. Reaffirmed here: every gate transition in the five-role workflow forces a hand-edit to the task frontmatter, despite the workflow having a deterministic "after role X passes its gate, set status to Y" rule. The agent that just finished its role *could* flip the frontmatter as part of its output, but role specs vary on whether they should (Planner currently flips `planning → reviewing-plan`, Verifier sets attempt status not task status, Judge flips to `reviewing-result`). Cleanup pattern: every role flips on completion if the human gate isn't enforced; auto-approve criteria short-circuit the next status flip in trivial cases.
+- **Proposed fix:** Codify the status transitions in `base/workflows/ship-feature.md` (and other workflow files), and have the runner — not the agent — perform the frontmatter flip when a role's exit conditions are met. This decouples role responsibility (produce artifact + report) from state-machine maintenance (set the next status). Auto-approve criteria for `fan-out: 1 ∧ trivial: true` plus `verifier-passed ∧ all-AC-pass` cases would skip ~half the gates we hit today.
+
+### F015 — Status transitions, gate flips, worktree management should be runner-mechanical, not human-typed [P0] → task-022
 
 - **Date:** 2026-05-09
 - **Source:** Human review during CanvasOS task 000 mid-journey.

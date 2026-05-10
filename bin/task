@@ -38,6 +38,7 @@ from lib.task_schema import (
     validate_frontmatter,
     validate_transition,
 )
+from lib.transitions import apply_transition
 
 
 # ---------------------------------------------------------------------------
@@ -221,88 +222,24 @@ def cmd_new(ctx: Context, args: argparse.Namespace) -> int:
 
 
 def cmd_move(ctx: Context, args: argparse.Namespace) -> int:
-    tasks_dir = ctx.repo_root / "tasks"
+    """Move a task to a new status.
 
-    # Search all configured folders for the task.
-    matches: list[Path] = []
-    for folder in layout_folders(ctx.layout):
-        folder_path = tasks_dir / folder
-        if not folder_path.exists():
-            continue
-        matches.extend(folder_path.glob(f"{args.id}*.md"))
-
-    if not matches:
-        print(f"No task found with id {args.id}", file=sys.stderr)
-        return 1
-    if len(matches) > 1:
-        print(f"Multiple tasks match: {matches}", file=sys.stderr)
-        return 1
-
-    task_file = matches[0]
-    content = task_file.read_text()
-
-    # Parse existing frontmatter to get old status.
-    fm_data = parse_frontmatter(content)
-    old_status = str(fm_data.get("status", ""))
-
-    # Validate transition.
-    new_status = args.status
-    if new_status not in VALID_STATUSES:
-        print(
-            f"Invalid status: {new_status!r}. Must be one of: {', '.join(VALID_STATUSES)}",
-            file=sys.stderr,
+    Delegates all validation, frontmatter mutation, and file-move logic
+    to transitions.apply_transition — the single shared code path for
+    both manual and automatic flips (AC5).
+    """
+    try:
+        new_path = apply_transition(
+            repo_root=ctx.repo_root,
+            task_id=args.id,
+            new_status=args.status,
+            layout=ctx.layout,
         )
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    trans_errors = validate_transition(old_status, new_status)
-    if trans_errors:
-        for err in trans_errors:
-            print(f"Error: {err}", file=sys.stderr)
-        return 1
-
-    # Mutate the frontmatter dict.
-    fm_data["status"] = new_status
-    fm_data["updated"] = _now_iso()
-
-    # Re-validate full frontmatter post-edit.
-    fm_errors = validate_frontmatter(fm_data, ctx.layout)
-    if fm_errors:
-        for err in fm_errors:
-            print(f"Error: {err}", file=sys.stderr)
-        return 1
-
-    # Re-validate dependencies (ensure depends-on IDs still resolve).
-    depends_on = fm_data.get("depends-on", [])
-    if not isinstance(depends_on, list):
-        depends_on = []
-    task_id_str = str(fm_data.get("id", ""))
-    dep_strs = [str(d) for d in depends_on]
-    all_tasks = load_all_tasks(ctx.repo_root, ctx.layout)
-    dep_errors = validate_dependencies(task_id_str, dep_strs, all_tasks)
-    if dep_errors:
-        for err in dep_errors:
-            print(f"Error: {err}", file=sys.stderr)
-        return 1
-
-    # Reconstruct file: replace frontmatter block, preserve body.
-    # Split on the closing --- of the frontmatter.
-    parts = content.split("---", 2)
-    body = ("---" + parts[2]) if len(parts) >= 3 else ""
-    new_content = _emit_frontmatter(fm_data) + body
-
-    # Write updated content.
-    task_file.write_text(new_content)
-
-    # Move to the target folder if needed (atomic rename).
-    target_folder = folder_for_status(new_status, ctx.layout)
-    if task_file.parent.name != target_folder:
-        target_dir = tasks_dir / target_folder
-        target_dir.mkdir(exist_ok=True)
-        new_path = target_dir / task_file.name
-        os.replace(task_file, new_path)
-        task_file = new_path
-
-    print(f"Moved {task_file.relative_to(ctx.repo_root)} → status: {new_status}")
+    print(new_path)
     return 0
 
 

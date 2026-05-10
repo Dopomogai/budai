@@ -220,6 +220,10 @@ The `gate-rules` field maps each role to a gate mode:
 
 The `auto-approve-when` field is the workflow-wide default rule. `gate-rules` provides per-role overrides. When both apply, `gate-rules` wins (it is more specific).
 
+### Auto-flip runtime behavior
+
+After each role finishes, the runner reads the gate-rule for that role and calls `bin/lib/transitions.flip_for_role`. For `auto` gates it atomically updates `status:` (and any implied booleans such as `plan-approved` or `result-approved`) via `transitions.apply_transition`, then continues dispatching the next role. For `human` gates it prints a single-line halt message with the manual command (`python3 bin/task move <id> <new-status>`) and stops the loop — no subsequent roles run until the human flips the status. For `auto-when:<predicate>` gates it evaluates the predicate against the current journey state (fan-out, verifier evidence, ADR count, etc.) and auto-flips on True or halts on False. Every decision is appended to `.agents/runs/<run-id>/transitions.json` for audit. Fail-closed semantics apply: any missing predicate-context source counts as False and halts for human approval. See `memory/decisions/0004-auto-flip-frontmatter-and-predicate-context.md` for full source-table and module-ownership rationale.
+
 ### Predicate language (v1)
 
 Predicates are atoms or AND combinations of atoms. **No OR, no negation in v1.** The atom set is closed — adding a new predicate requires a runner code change and an ADR update. See `memory/decisions/0003-workflow-taxonomy-and-gate-rules.md` for the full specification.
