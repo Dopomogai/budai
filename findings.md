@@ -12,6 +12,32 @@ When closed as not-actually-a-problem, move to **Dismissed** with a one-line rea
 
 ## Open
 
+### F031 — Subagent tool calls hit permission prompts not matching the granular allow-list [P1]
+
+- **Date:** 2026-05-11
+- **Source:** Journey 6 (task-022 medium-track) — human feedback: "still too many permissions to approve - mostly in the spawned agents". User hypothesized worktrees as cause; ruled out (permissions are command-pattern based, not path-based).
+- **Context:** Spawned subagents (Planner, Implementer, Verifier) issue tool calls that don't always match the patterns in `.claude/settings.local.json`. Likely culprits observed across J4-J6:
+  - `git -c user.name=... -c user.email=... commit -m "..."` — doesn't match `Bash(git commit*)` because the immediate prefix is `git -c`, not `git commit`. Currently allowed by an extremely specific single-quoted pattern that breaks on quoting variation.
+  - Compound commands chained with `&&` and `;` — pattern matchers may not apply to each clause individually.
+  - Pipe + `tee` redirects (`pytest ... 2>&1 | tee evidence/...`).
+  - `awk`, `find`, and `grep` invocations with multi-flag combinations.
+- **Proposed fix:** Two parts. (1) **Pattern audit**: scan the actual subagent transcripts from journeys 4-6 for `<Bash command="...">` calls that triggered permission prompts; extract recurring patterns; bulk-update `.claude/settings.local.json` allow patterns to cover them. (2) **Guidance for prompts**: instruct subagents to prefer simple invocations (`python3 -m pytest ...` over compound commands; use Read/Write tool over Bash for file ops). This is a fast-track candidate task once journey 6 closes — small mechanical edit to settings + minor prompt updates.
+
+### F030 — Runner doesn't preload seeded input contents into composed system prompt; agents pay Read-call cost [P2]
+
+- **Date:** 2026-05-11
+- **Source:** Journey 6 (task-022 medium-track) — human observation during plan review: spawned Planner spent ~10 Read tool calls just acquiring context (system prompt, task body, schemas, runner.py, ADR 0003, plan-format spec, etc.) that we already had loaded.
+- **Context:** Task-021 (J4) ships `journey_state.seed_worktree()` which copies task body + bundle + ADRs into `<worktree>/.agents/runs/<run-id>/inputs/` as files. The composed system prompt then includes a `## Journey inputs` block listing relative paths. **The agent still has to Read each path explicitly to get the content.** That's N tool-call round-trips per dispatch (latency + tokens for the Read calls + responses).
+- **Proposed fix:** Budget-aware preloading. After `seed_worktree()` populates `inputs/`, `compose_system_prompt` reads the seeded files and embeds their content directly in the prompt under a `## Preloaded inputs` section, up to a configurable budget (default ~30k tokens). Files exceeding the budget remain referenced by relative path (current behavior). Net effect: most planner/implementer/verifier dispatches save 5-10 Read round-trips. Trade-off: bigger prompts, but the agent would Read those files anyway. Budget-aware avoids prompt explosion. Likely a medium-track task — needs one architectural decision on inclusion order + budget mechanism (newest-first vs largest-first vs plan-then-task-then-ADR ordering). Depends-on: task-021 (already shipped).
+
+### F029 — Workflow files with unquoted YAML strings containing colons crash `parse_workflow_file` [P2] → fixed at journey-6 pre-flight (commit `bac50c5`)
+
+- **Date:** 2026-05-11
+- **Source:** Journey 6 pre-flight — `bin/agent run --role planner --task 022` triggered the runner's new `[agent] workflow: medium-track` path (shipped in J5/task-019), which called `parse_workflow_file('base/workflows/medium-track.md')` and crashed on a YAML parse error (`mapping values are not allowed here` at line 11).
+- **Context:** medium-track.md had an unquoted entry-criteria list item: `- needs-architect: true AND fan-out: 1 AND ...`. YAML interprets the colons as nested mappings, not as part of a string. Other workflow files (fast-track, ship-feature, fix-bug) correctly quote their colon-bearing strings; only medium-track was affected. **Why the J5 Verifier missed it:** unit tests in `test_workflow_schema.py` constructed valid YAML frontmatter rather than parsing the actual shipped `base/workflows/*.md` files. The "load every shipped workflow file" smoke test was missing.
+- **Proposed fix (already applied):** Quote the offending string. Inline edit during journey-6 pre-flight; committed at `bac50c5` separately from the task-022 feature commit.
+- **Follow-up still open:** add a smoke test to `test_workflow_schema.py` that calls `parse_workflow_file(f)` on every file in `base/workflows/*.md` and asserts `validate_workflow_spec(spec) == []`. This catches author errors at CI time. **Fast-track candidate.**
+
 ### F028 — `compose_system_prompt` mixes text composition with filesystem mutation; `select_inputs` default layout could silently mis-route [P2]
 
 - **Date:** 2026-05-10
