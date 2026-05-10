@@ -4,7 +4,7 @@ title: Align release status and doc truth
 type: docs
 scope: docs
 priority: P0
-status: todo
+status: open
 fan-out: 1
 needs-architect: true
 plan-approved: false

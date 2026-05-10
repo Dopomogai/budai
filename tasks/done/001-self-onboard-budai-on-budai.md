@@ -4,21 +4,23 @@ title: Self-onboard budai on budai
 type: feature
 scope: dogfood
 priority: P1
-status: todo
+status: done
 fan-out: 1
 needs-architect: true
-plan-approved: false
-result-approved: false
+plan-approved: true
+result-approved: true
 trivial: false
 depends-on: []
 blocks: [002, 003]
 sources: [F013]
 created: 2026-05-09T00:00:00Z
 created-by: human
-updated: 2026-05-09T00:00:00Z
+updated: 2026-05-10T16:30:00Z
 workflow: ship-feature
 bundle-budget: 80000
 retry-budget: 2
+result-commit: 4acbb12
+archived-note: Onboarding work completed by parallel agent at commit 4acbb12 before task-001 was archived. Backfilled at journey-4 close as part of schema cleanup sweep.
 ---
 
 # Task 001: Self-onboard budai on budai

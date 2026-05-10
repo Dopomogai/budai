@@ -4,7 +4,7 @@ title: Consumer invocation path
 type: feature
 scope: onboarding
 priority: P2
-status: todo
+status: open
 fan-out: 1
 needs-architect: true
 plan-approved: false

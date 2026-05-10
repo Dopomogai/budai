@@ -4,7 +4,7 @@ title: Deterministic token and bundle basics
 type: feature
 scope: bundle
 priority: P1
-status: todo
+status: open
 fan-out: 1
 needs-architect: true
 plan-approved: false

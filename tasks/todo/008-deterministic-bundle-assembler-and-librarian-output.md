@@ -4,7 +4,7 @@ title: Deterministic bundle assembler and Librarian output
 type: feature
 scope: bundle
 priority: P1
-status: todo
+status: open
 fan-out: 1
 needs-architect: true
 plan-approved: false

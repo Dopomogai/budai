@@ -4,7 +4,7 @@ title: Header maintenance convention and index strictness
 type: feature
 scope: headers
 priority: P2
-status: todo
+status: open
 fan-out: 1
 needs-architect: true
 plan-approved: false
