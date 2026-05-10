@@ -12,6 +12,15 @@ When closed as not-actually-a-problem, move to **Dismissed** with a one-line rea
 
 ## Open
 
+### F028 — `compose_system_prompt` mixes text composition with filesystem mutation; `select_inputs` default layout could silently mis-route [P2]
+
+- **Date:** 2026-05-10
+- **Source:** Journey 4 (task-021 medium-track) — Verifier code-quality observation, also flagged by Implementer in attempt-A.md.
+- **Context:** Two coupled concerns from the task-021 implementation:
+  - `bin/lib/runner.py::compose_system_prompt` now calls `journey_state.seed_worktree` directly (rather than via the `seed_worktree_inputs` wrapper) to avoid double-seeding when both functions run in the same dispatch sequence. The result is a function named `compose_*` that has a real filesystem side effect — copying files into the worktree. Defensible for task-021 (the alternative was a double-seed), but a code smell. Future readers will be surprised.
+  - `bin/lib/journey_state.py::select_inputs` defaults `layout` to `"legacy-four-folder"`. On a consumer repo using `tasks-layout: standard` in its manifest, callers that don't pass `layout=manifest.tasks_layout` will silently look in the wrong folders. Tasks 019 (workflows) and 022 (auto-flip) will both call this function and need explicit `layout` plumbing.
+- **Proposed fix:** Two parts. (1) Refactor `compose_system_prompt` to be pure (assemble text only) and move the seeding side effect to a sibling function `prepare_dispatch(spec, manifest)` that callers invoke before `dispatch_claude_code`. The text-composition function then takes the seeded paths as input rather than triggering the seed itself. (2) Either change `select_inputs`'s default to raise on unspecified layout (force callers to be explicit) OR add a one-line note at every call site reminding "pass `layout=manifest.tasks_layout`." The first is safer; the second is cheaper. Defer to whoever ships task-019.
+
 ### F027 — Task-body-as-spec ambiguity in fast-track for signature-changing fixes [P2]
 
 - **Date:** 2026-05-10
