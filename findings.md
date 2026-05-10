@@ -12,6 +12,12 @@ When closed as not-actually-a-problem, move to **Dismissed** with a one-line rea
 
 ## Open
 
+### F027 — Task-body-as-spec ambiguity in fast-track for signature-changing fixes [P2]
+
+- **Date:** 2026-05-10
+- **Source:** Journey 3 (task-020 fast-track) — Implementer correctly inferred that `bin/agent` and `bin/lib/runner.py` needed updates when `resolve()`'s signature changed, but the inference relied on the agent reasoning about callers; the task body had only listed 6 files and the Implementer touched 7.
+- **Context:** Fast-track skips the Planner, so the Implementer is the only role that sees the change set. For mechanical fixes the task body's enumerated files are usually sufficient. But when a fix changes a function signature, every caller becomes an implicit dependency that the task body may not have listed. The Implementer caught this on task-020; on a more complex change it might miss callers silently.
+- **Proposed fix:** When task-019's `base/workflows/fast-track.md` lands, add a step to the Implementer flow: "If your change alters a public function signature, scan the codebase for callers and update them; flag the scope expansion in your writeup. If callers are non-trivial to update, escalate to medium-track (Planner + Implementer + Verifier) instead." Or: only allow fast-track when `trivial: true` is set, where signature changes shouldn't happen.
 
 ### F021 — Worktrees branch from `main` and don't see uncommitted main-worktree state [P0]
 

@@ -4,19 +4,19 @@ title: resolution.py honors registry-source self (resolves base/ at repo root)
 type: bug
 scope: bin
 priority: P0
-status: open
+status: done
 fan-out: 1
 needs-architect: false
-plan-approved: false
-result-approved: false
+plan-approved: true
+result-approved: true
 trivial: false
 depends-on: []
 blocks: [019]
 sources: [F020]
 created: 2026-05-09T18:00:00Z
 created-by: human
-updated: 2026-05-09T18:00:00Z
-workflow: fix-bug
+updated: 2026-05-10T11:00:00Z
+workflow: fast-track
 bundle-budget: 50000
 retry-budget: 2
 ---
