@@ -36,7 +36,4 @@ venv/
 .agents/stats/
 .agents/index/
 
-# Local-only when registry-source: self (workaround until task-011 librarian sync implements
-# auto-populating .agents/base/ from repo-root base/). See findings.md F020.
-.agents/base
 

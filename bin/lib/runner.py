@@ -15,7 +15,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .resolution import resolve
+from .manifest import Manifest, load_manifest
+from .resolution import _base_dir, resolve
 
 
 # Tier → model ID mapping for claude-code runner
@@ -37,9 +38,17 @@ class RunSpec:
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
-def compose_system_prompt(spec: RunSpec) -> str:
-    """Compose the system prompt from role body + relevant overlays."""
-    role_path = resolve(spec.repo_root, "roles", spec.role_name)
+def compose_system_prompt(spec: RunSpec, manifest: "Manifest | None" = None) -> str:
+    """Compose the system prompt from role body + relevant overlays.
+
+    When manifest is provided its registry-source field determines which base
+    directory is searched for roles and conventions.  When None, the manifest
+    is loaded from disk.
+    """
+    if manifest is None:
+        manifest = load_manifest(spec.repo_root)
+
+    role_path = resolve(spec.repo_root, "roles", spec.role_name, manifest)
     if role_path is None:
         raise FileNotFoundError(f"Role not found: {spec.role_name}")
 
@@ -50,7 +59,8 @@ def compose_system_prompt(spec: RunSpec) -> str:
     # Add base + local conventions (full content; bundler usually trims, but
     # for the system prompt we include everything since conventions guide
     # the agent's overall behavior, not just per-task).
-    base_conv = spec.repo_root / ".agents" / "base" / "conventions.md"
+    base_root = _base_dir(spec.repo_root, manifest)
+    base_conv = base_root / "conventions.md"
     local_conv = spec.repo_root / ".agents" / "local" / "conventions.md"
 
     if base_conv.exists():

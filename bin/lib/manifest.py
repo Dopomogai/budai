@@ -39,6 +39,7 @@ class Manifest:
     defaults: dict[str, Any] = field(default_factory=dict)
     runtime_backend: dict[str, Any] | None = None
     tasks_layout: str = "standard"
+    registry_source: str = "self"
 
 
 def load_manifest(repo_root: Path) -> Manifest:
@@ -71,6 +72,7 @@ def load_manifest(repo_root: Path) -> Manifest:
         defaults=data.get("defaults", {}) or {},
         runtime_backend=data.get("runtime-backend"),
         tasks_layout=tasks_layout,
+        registry_source=data.get("registry-source", "self"),
     )
 
 

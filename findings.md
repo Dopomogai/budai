@@ -12,12 +12,6 @@ When closed as not-actually-a-problem, move to **Dismissed** with a one-line rea
 
 ## Open
 
-### F020 — Runner doesn't honor `registry-source: self` (always looks at `.agents/base/`) [P0]
-
-- **Date:** 2026-05-09
-- **Source:** Pre-flight of budai-on-budai task-004 journey. `python3 bin/agent run --role librarian --task 004` returned `Role not found: librarian / Available roles: []`.
-- **Context:** `bin/lib/resolution.py` resolves base files at `.agents/base/<category>/<name>.md` unconditionally (line 33). But when a repo declares `registry-source: self` in its manifest, the authoritative tree lives at `<repo_root>/base/`, not under `.agents/`. budai itself ships `base/` at repo root via committed history (`f393d82` etc.) with no path under `.agents/base/`. Result: the runner can never find any roles/skills/runners/workflows when budai runs against itself. Worked around for this run by symlinking `.agents/base -> ../base` (gitignored). This is task-011 territory in part (`librarian sync` should populate `.agents/base/`), but the resolution logic also needs a `registry-source: self` branch that points directly at `<repo_root>/base/`.
-- **Proposed fix:** In `bin/lib/resolution.py`, read manifest's `registry-source`; when `self`, look up `<repo_root>/base/<category>/<name>.md` (and optionally still allow `.agents/base/` as a fallback for hybrid setups). Or: have `librarian init` / a future `bin/budai bootstrap` create the symlink/copy automatically as part of self-registration. Either way: stop requiring a manual symlink to dogfood.
 
 ### F021 — Worktrees branch from `main` and don't see uncommitted main-worktree state [P0]
 
@@ -64,6 +58,13 @@ When closed as not-actually-a-problem, move to **Dismissed** with a one-line rea
 
 
 ## Promoted
+
+### F020 — Runner doesn't honor `registry-source: self` (always looks at `.agents/base/`) [P0] → task-020
+
+- **Date:** 2026-05-09
+- **Source:** Pre-flight of budai-on-budai task-004 journey. `python3 bin/agent run --role librarian --task 004` returned `Role not found: librarian / Available roles: []`.
+- **Context:** `bin/lib/resolution.py` resolves base files at `.agents/base/<category>/<name>.md` unconditionally (line 33). But when a repo declares `registry-source: self` in its manifest, the authoritative tree lives at `<repo_root>/base/`, not under `.agents/`. budai itself ships `base/` at repo root via committed history (`f393d82` etc.) with no path under `.agents/base/`. Result: the runner can never find any roles/skills/runners/workflows when budai runs against itself. Worked around for this run by symlinking `.agents/base -> ../base` (gitignored). This is task-011 territory in part (`librarian sync` should populate `.agents/base/`), but the resolution logic also needs a `registry-source: self` branch that points directly at `<repo_root>/base/`.
+- **Proposed fix:** In `bin/lib/resolution.py`, read manifest's `registry-source`; when `self`, look up `<repo_root>/base/<category>/<name>.md` (and optionally still allow `.agents/base/` as a fallback for hybrid setups). Or: have `librarian init` / a future `bin/budai bootstrap` create the symlink/copy automatically as part of self-registration. Either way: stop requiring a manual symlink to dogfood.
 
 ### F001 — `chars/4` heuristic for token counting [P1]
 

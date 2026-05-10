@@ -15,28 +15,29 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.manifest import find_repo_root, load_manifest
-from lib.resolution import resolve
+from lib.resolution import list_available, resolve
 from lib.runner import RunSpec, compose_system_prompt, dispatch_claude_code, make_run_dir
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     repo_root = find_repo_root()
+    manifest = load_manifest(repo_root)
 
-    role_path = resolve(repo_root, "roles", args.role)
+    role_path = resolve(repo_root, "roles", args.role, manifest)
     if role_path is None:
         print(f"Role not found: {args.role}", file=sys.stderr)
-        print(f"Available roles: {sorted([p.stem for p in (repo_root / '.agents/base/roles').glob('*.md') if (repo_root / '.agents/base/roles').exists()])}", file=sys.stderr)
+        available = list_available(repo_root, "roles", manifest)
+        print(f"Available roles: {available}", file=sys.stderr)
         return 1
 
     runner_name = args.runner or "claude-code"
-    runner_path = resolve(repo_root, "runners", runner_name)
+    runner_path = resolve(repo_root, "runners", runner_name, manifest)
     if runner_path is None:
         print(f"Runner not found: {runner_name}", file=sys.stderr)
         return 1
 
     tier = args.tier
     if not tier:
-        manifest = load_manifest(repo_root)
         tier = manifest.defaults.get("model-default", "sonnet")
 
     spec = RunSpec(
@@ -48,7 +49,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     # Compose system prompt
-    system_prompt = compose_system_prompt(spec)
+    system_prompt = compose_system_prompt(spec, manifest)
 
     # Save to temp file
     run_dir = make_run_dir(spec)
