@@ -10,6 +10,20 @@ stability: stable
 auto-spawn-follow-ups:
   - condition: always
     template: regression-test-<id>
+roles: [librarian, planner, implementer, verifier, judge]
+entry-criteria:
+  - "task type: bug"
+exit-criteria:
+  - bug no longer reproduces
+  - regression test added
+skipped-artifacts: []
+auto-approve-when: all-ac-pass AND fan-out-1
+gate-rules:
+  librarian: auto
+  planner: auto-when:trivial
+  implementer: auto
+  verifier: auto
+  judge: human
 ---
 
 # fix-bug

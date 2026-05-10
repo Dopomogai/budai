@@ -1,6 +1,6 @@
 ---
 workflow: ship-feature
-version: 1.0.0
+version: 1.1.0
 applicable-task-types: [feature]
 default-fan-out: 1
 human-gates: [end-of-planner, end-of-judge]
@@ -10,6 +10,22 @@ stability: stable
 auto-spawn-follow-ups:
   - condition: always
     template: test-coverage-<id>
+roles: [librarian, planner, implementer, verifier, judge]
+entry-criteria:
+  - "task type: feature"
+  - "no faster workflow applies"
+exit-criteria:
+  - all ACs pass per Verifier and Judge
+  - verdict.md written
+  - task moved to done/
+skipped-artifacts: []
+auto-approve-when: never
+gate-rules:
+  librarian: auto
+  planner: human
+  implementer: auto
+  verifier: auto
+  judge: human
 ---
 
 # ship-feature

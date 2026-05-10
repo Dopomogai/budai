@@ -16,7 +16,7 @@ sources: []
 created: 2026-05-09T00:00:00Z
 created-by: human
 updated: 2026-05-09T00:00:00Z
-workflow: ship-feature
+workflow: ship-feature  # one of: ship-feature, fix-bug, fast-track, medium-track, scaffold-project, scaffold-docs, strategic-audit, prepare-task, estimate-task
 bundle-budget: 80000
 retry-budget: 2
 ---

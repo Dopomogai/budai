@@ -16,8 +16,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .manifest import Manifest, load_manifest
-from .resolution import _base_dir, resolve
+from .resolution import _base_dir, list_available, resolve
 from . import journey_state
+from .workflow_schema import WorkflowSpec, parse_workflow_file, validate_workflow_spec
+from .task_schema import parse_frontmatter
 
 
 # Tier → model ID mapping for claude-code runner
@@ -39,6 +41,7 @@ class RunSpec:
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     worktree: Path | None = None
     prior_attempt_dir: Path | None = None
+    workflow_name: str | None = None
 
 
 def compose_system_prompt(spec: RunSpec, manifest: "Manifest | None" = None) -> str:
@@ -151,6 +154,135 @@ def seed_worktree_inputs(spec: RunSpec, manifest: "Manifest") -> list[Path]:
         prior_attempt_dir=spec.prior_attempt_dir,
     )
     return journey_state.seed_worktree(worktree_root, spec.run_id, seed_plan)
+
+
+def read_workflow_from_task(
+    repo_root: Path,
+    task_id: str,
+    manifest: "Manifest",
+) -> str | None:
+    """Read the workflow: field from a task's frontmatter.
+
+    Uses task_schema.parse_frontmatter for consistency with the rest of the
+    task-reading surface. Returns None if the task cannot be found or has no
+    workflow: field.
+
+    Args:
+        repo_root: Absolute path to the repository root.
+        task_id: Task ID string (e.g., "019").
+        manifest: Already-loaded Manifest (determines tasks_layout).
+
+    Returns:
+        The workflow name string if present in the task frontmatter, else None.
+    """
+    from .task_schema import layout_folders
+
+    tasks_root = repo_root / "tasks"
+    for folder in layout_folders(manifest.tasks_layout):
+        folder_path = tasks_root / folder
+        if not folder_path.exists():
+            continue
+        for task_file in folder_path.glob("*.md"):
+            if task_file.stem.startswith(task_id):
+                try:
+                    text = task_file.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                fm = parse_frontmatter(text)
+                workflow_val = fm.get("workflow")
+                if workflow_val:
+                    return str(workflow_val)
+                return None
+    return None
+
+
+def resolve_workflow_name(spec: "RunSpec", manifest: "Manifest") -> str:
+    """Resolve the effective workflow name per ADR 0003 override semantics.
+
+    Resolution order (first non-None wins):
+    1. spec.workflow_name (--workflow CLI flag).
+    2. task frontmatter workflow: field.
+    3. Default: "ship-feature".
+
+    Args:
+        spec: RunSpec with repo_root, task_id, and optional workflow_name.
+        manifest: Already-loaded Manifest.
+
+    Returns:
+        Resolved workflow name string.
+    """
+    if spec.workflow_name:
+        return spec.workflow_name
+
+    from_task = read_workflow_from_task(spec.repo_root, spec.task_id, manifest)
+    if from_task:
+        return from_task
+
+    return "ship-feature"
+
+
+def load_workflow(spec: "RunSpec", manifest: "Manifest") -> WorkflowSpec:
+    """Load and validate the workflow file for the given spec.
+
+    Resolves the workflow name via resolve_workflow_name, then resolves the
+    file path via resolution.resolve(), parses it, and validates it.
+
+    Raises:
+        ValueError: If no matching workflow file is found or the spec is invalid.
+
+    Args:
+        spec: RunSpec with repo_root, task_id, and optional workflow_name.
+        manifest: Already-loaded Manifest.
+
+    Returns:
+        Validated WorkflowSpec.
+    """
+    name = resolve_workflow_name(spec, manifest)
+    workflow_path = resolve(spec.repo_root, "workflows", name, manifest)
+    if workflow_path is None:
+        available = list_available(spec.repo_root, "workflows", manifest)
+        raise ValueError(
+            f"Unknown workflow: {name!r}. "
+            f"Available: {available}"
+        )
+
+    wf = parse_workflow_file(workflow_path)
+    errors = validate_workflow_spec(wf)
+    if errors:
+        raise ValueError(
+            f"Workflow file {workflow_path} is invalid:\n" + "\n".join(f"  - {e}" for e in errors)
+        )
+    return wf
+
+
+def dispatch_roles(
+    spec: "RunSpec",
+    workflow: WorkflowSpec,
+    manifest: "Manifest",
+) -> int:
+    """Iterate workflow roles and dispatch each (Phase-0 stub).
+
+    For each role declared in workflow.roles (in order):
+    - Consults workflow.gate_rules[role] to determine gate mode.
+    - Phase 0: prints "would dispatch <role> with gate <mode>" rather than
+      spawning a real subprocess (real dispatch waits for task-009).
+
+    Raises:
+        ValueError: If a role in workflow.roles has no corresponding gate_rules
+            entry and the lookup is required.
+
+    Args:
+        spec: RunSpec describing the task and runner.
+        workflow: Validated WorkflowSpec with roles + gate_rules.
+        manifest: Already-loaded Manifest (determines tasks_layout).
+
+    Returns:
+        Exit code (0 = success).
+    """
+    for role in workflow.roles:
+        gate_mode = workflow.gate_rules.get(role, "human")
+        print(f"[runner] would dispatch {role} with gate {gate_mode}")
+    return 0
 
 
 def close_journey(

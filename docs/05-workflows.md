@@ -25,7 +25,7 @@ A workflow is a markdown file with YAML frontmatter and a body. Lives at `base/w
 ```yaml
 ---
 workflow: ship-feature
-version: 1.2.0
+version: 1.1.0
 applicable-task-types: [feature]
 default-fan-out: 1
 human-gates: [end-of-planner, end-of-judge]
@@ -35,6 +35,22 @@ stability: stable
 auto-spawn-follow-ups:
   - condition: always
     template: test-coverage-<id>
+roles: [librarian, planner, implementer, verifier, judge]
+entry-criteria:
+  - "task type: feature"
+  - "no faster workflow applies"
+exit-criteria:
+  - all ACs pass per Verifier and Judge
+  - verdict.md written
+  - task moved to done/
+skipped-artifacts: []
+auto-approve-when: never
+gate-rules:
+  librarian: auto
+  planner: human
+  implementer: auto
+  verifier: auto
+  judge: human
 ---
 ```
 
@@ -49,6 +65,12 @@ Field reference:
 - **peer-reviewers** — number of Reviewer instances run before the Judge. 0 means the Judge alone reviews; N>0 adds explicit anonymized peer review.
 - **stability** — same semantics as skills.
 - **auto-spawn-follow-ups** — list of templates for tasks the workflow opens after success. Conditions: `always`, `findings-above-threshold`, `tests-missing`, etc.
+- **roles** — ordered list of role names. The runner dispatches these roles in declared order. Replaces the implicit five-role chain assumption.
+- **entry-criteria** — bulleted predicates (free-text) describing when this workflow is appropriate. Advisory for the human or future router heuristic; not machine-parsed.
+- **exit-criteria** — bulleted predicates for what "done" looks like for this workflow. Advisory.
+- **skipped-artifacts** — list of artifact names (e.g., `bundle`, `verdict`, `evidence-files`, `adrs`) that this workflow does not produce and should not be expected by downstream roles.
+- **auto-approve-when** — top-level rule for whether the workflow ever auto-approves. Either `never` or a predicate expression (see "Gate rules and predicates" below). When `never`, every gate declared in `human-gates` requires human approval.
+- **gate-rules** — map of role-name → gate-mode. Each entry: `human`, `auto`, or `auto-when:<predicate>`. The runner consults this after each role finishes to decide whether to halt for human approval or auto-proceed. See ADR 0003 for the predicate language definition. When `gate-rules` and `human-gates` conflict, `gate-rules` wins (it is more specific).
 
 ### Body sections
 
@@ -61,26 +83,13 @@ Required, in order:
 5. **Auto-spawned follow-ups.** What additional tasks the workflow opens after success.
 6. **Variants.** How this workflow differs from related workflows. Cross-references.
 
-## The four default workflows
+## The nine default workflows
 
 ### `ship-feature`
 
 The canonical full lifecycle. The 12 steps in `08-the-journey.md` are the body of `ship-feature`. That doc is authoritative; this section only summarizes.
 
-Frontmatter:
-
-```yaml
-workflow: ship-feature
-version: 1.2.0
-applicable-task-types: [feature]
-default-fan-out: 1
-human-gates: [end-of-planner, end-of-judge]
-default-retry-budget: 2
-peer-reviewers: 0
-auto-spawn-follow-ups:
-  - condition: always
-    template: test-coverage-<id>
-```
+Roles: `[librarian, planner, implementer, verifier, judge]`. Human gates: end-of-planner, end-of-judge. See `base/workflows/ship-feature.md` for full frontmatter.
 
 Use this for any task creating new product capability.
 
@@ -93,23 +102,70 @@ Faster path for defects. Key differences from `ship-feature`:
 - **Mandatory regression test in follow-ups.** The auto-spawned follow-up is a regression-test task — different from the `test-coverage` follow-up of `ship-feature` because regression tests target the specific failure mode of the bug, not general test coverage.
 - **Tighter retry budget.** `default-retry-budget: 1`. If a fix doesn't work after one retry, it's a more complex investigation; escalate to Planner.
 - **One human gate.** End-of-Planner is skipped when trivial; end-of-Judge stays.
+- **Auto-approve-when:** `all-ac-pass AND fan-out-1`. Bug fixes often qualify for auto-approve since the AC is "the bug doesn't reproduce" and that's mechanically verifiable.
 
-```yaml
-workflow: fix-bug
-version: 1.0.0
-applicable-task-types: [bug]
-default-fan-out: 1
-human-gates: [end-of-judge]
-default-retry-budget: 1
-peer-reviewers: 0
-auto-spawn-follow-ups:
-  - condition: always
-    template: regression-test-<id>
-```
+Roles: `[librarian, planner, implementer, verifier, judge]`. See `base/workflows/fix-bug.md` for full frontmatter.
+
+### `fast-track`
+
+Single-Implementer workflow for trivial fixes. Empirically validated by journey 3 (task-020).
+
+- **One role.** Implementer alone; no bundle, no Verifier worktree, no ADRs.
+- **Single human gate.** Human reviews the diff directly after the Implementer submits.
+- **Skipped artifacts:** bundle, plan, verdict, evidence-files, verifier-worktree, adrs.
+- **Auto-approve-when:** never (always human gate at end).
+
+Roles: `[implementer]`. See `base/workflows/fast-track.md` for full frontmatter and entry criteria.
+
+**Not appropriate for:** tasks with multiple plausible architectural shapes, tasks touching >10 files, tasks with `needs-architect: true`, tasks where AC list is fuzzy.
+
+### `medium-track`
+
+Three-role workflow for non-trivial single-attempt work. Empirically validated by journey 4 (task-021). The middle path between fast-track and ship-feature.
+
+- **Three roles.** Planner → Implementer → Verifier; no Librarian, no Judge.
+- **Two human gates.** End-of-Planner (review plan + ADR), end-of-Verifier (review evidence).
+- **Implementer gate is auto.** Implementer output flows straight to Verifier. At fan-out 1, the Verifier IS the human's proxy for code quality.
+- **Skipped artifacts:** bundle (no Librarian), verdict (no Judge — Verifier's report is final).
+- **Auto-approve-when:** `fan-out-1 AND verifier-passed`.
+
+Roles: `[planner, implementer, verifier]`. See `base/workflows/medium-track.md` for full frontmatter and entry criteria.
+
+**Refactor-classified tasks** may use `medium-track` when scope is small (≤7 files, one clear decision to make, no fan-out needed).
+
+### `scaffold-project`
+
+For onboarding a consumer repo to budai. **Not yet empirically validated.** See `base/workflows/scaffold-project.md`.
+
+Roles: `[librarian, planner, implementer, verifier]`. Applicable task types: `[feature]`. Stability: experimental (stub).
+
+### `scaffold-docs`
+
+For pure documentation work with no code changes. **Not yet empirically validated.** See `base/workflows/scaffold-docs.md`.
+
+Roles: `[librarian, implementer, verifier]`. Applicable task types: `[refactor, feature]`. Stability: experimental (stub). Skips Planner and Judge.
+
+### `strategic-audit`
+
+For "plan the backlog" work where the output is a human-reviewed task list, not code. **Not yet empirically validated.** See `base/workflows/strategic-audit.md`.
+
+Roles: `[librarian, planner]`. Applicable task types: `[audit, research]`. Stability: experimental (stub). Skips Implementer, Verifier, and Judge entirely.
+
+### `prepare-task`
+
+Pre-stages a task by running Librarian + Planner and halting after plan-approved. No Implementer runs. Use when you want to queue a well-scoped task for later dispatch. **Not yet empirically validated.** See `base/workflows/prepare-task.md`.
+
+Roles: `[librarian, planner]`. Applicable task types: `[feature, bug, refactor]`. Stability: experimental (stub).
+
+### `estimate-task`
+
+For cost forecasting before committing to a task. Output is a JSON estimate (tokens, wall-time, human-gates, confidence), not code. **Not yet empirically validated.** See `base/workflows/estimate-task.md`.
+
+Roles: `[librarian, planner]`. Applicable task types: `[feature, bug, refactor]`. Stability: experimental (stub).
 
 ### `refactor`
 
-For changes that don't add capability but reshape existing code. Key differences:
+For changes that don't add capability but reshape existing code. Key differences from `ship-feature`:
 
 - **Mandatory Planner.** No skip. Refactors without architecture review become reverse-engineering puzzles for future readers.
 - **Mandatory ADR if scope > one file.** The Planner writes a `memory/decisions/<NNNN>-<slug>.md` for any cross-file refactor. Single-file refactors don't need an ADR.
@@ -127,6 +183,8 @@ default-retry-budget: 2
 peer-reviewers: 2
 mandatory-adr-threshold: 2-files
 ```
+
+Note: for small-scope refactors (≤7 files, one architectural decision), `medium-track` is often more appropriate than `refactor`.
 
 ### `audit-repo`
 
@@ -151,6 +209,42 @@ auto-spawn-follow-ups:
 ```
 
 Note: the Auditor is a Librarian variant invoked through this workflow's role definition, not a separate role file in the default five. If audit work grows in scope, splitting Auditor out of Librarian is a future option.
+
+## Gate rules and predicates
+
+The `gate-rules` field maps each role to a gate mode:
+
+- **`human`** — pause and require human approval before proceeding to the next role.
+- **`auto`** — automatically proceed to the next role without human approval.
+- **`auto-when:<predicate>`** — evaluate the predicate against the current journey state; if true, auto-proceed; otherwise, halt for human approval.
+
+The `auto-approve-when` field is the workflow-wide default rule. `gate-rules` provides per-role overrides. When both apply, `gate-rules` wins (it is more specific).
+
+### Predicate language (v1)
+
+Predicates are atoms or AND combinations of atoms. **No OR, no negation in v1.** The atom set is closed — adding a new predicate requires a runner code change and an ADR update. See `memory/decisions/0003-workflow-taxonomy-and-gate-rules.md` for the full specification.
+
+**Valid atoms (v1):**
+
+| Atom | Meaning |
+|---|---|
+| `fan-out-1` | Task's effective fan-out is 1 |
+| `verifier-passed` | Most-recent Verifier report says all ACs pass |
+| `trivial` | Task frontmatter has `trivial: true` |
+| `all-ac-pass` | Judge or Verifier confirmed every AC passes |
+| `no-new-adr` | No new file under `memory/decisions/` in this run |
+| `single-attempt` | Only one Implementer attempt exists |
+
+**Examples:**
+
+```
+auto-approve-when: never
+auto-approve-when: fan-out-1 AND verifier-passed
+gate-rules: {planner: human, implementer: auto, verifier: human}
+gate-rules: {planner: auto-when:trivial, implementer: auto, judge: human}
+```
+
+If a workflow needs richer logic (e.g., trivial AND fan-out-1 AND no-new-adr), the right answer is to encode the combination as a new named atom in the ADR rather than extending the operator set. This keeps predicate evaluation simple and auditable.
 
 ## Hand-off contracts
 

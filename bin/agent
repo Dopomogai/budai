@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib.manifest import find_repo_root, load_manifest
 from lib.resolution import list_available, resolve
-from lib.runner import RunSpec, compose_system_prompt, dispatch_claude_code, make_run_dir
+from lib.runner import RunSpec, compose_system_prompt, dispatch_claude_code, load_workflow, make_run_dir, resolve_workflow_name
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -42,6 +42,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     worktree = Path(args.worktree).resolve() if args.worktree else None
     prior_attempt_dir = Path(args.prior_attempt_dir).resolve() if args.prior_attempt_dir else None
+    workflow_name_flag: str | None = getattr(args, "workflow", None)
 
     spec = RunSpec(
         repo_root=repo_root,
@@ -51,7 +52,24 @@ def cmd_run(args: argparse.Namespace) -> int:
         tier=tier,
         worktree=worktree,
         prior_attempt_dir=prior_attempt_dir,
+        workflow_name=workflow_name_flag,
     )
+
+    # Resolve and validate workflow name, fail fast on unknown names.
+    resolved_wf_name = resolve_workflow_name(spec, manifest)
+    if workflow_name_flag:
+        wf_source = "from --workflow flag"
+    elif resolved_wf_name != "ship-feature":
+        wf_source = "from task frontmatter"
+    else:
+        wf_source = "default"
+    print(f"[agent] workflow: {resolved_wf_name} ({wf_source})", file=sys.stderr)
+
+    try:
+        load_workflow(spec, manifest)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     # Compose system prompt
     system_prompt = compose_system_prompt(spec, manifest)
@@ -86,6 +104,10 @@ def main() -> int:
     p_run.add_argument(
         "--prior-attempt-dir",
         help="Directory containing a previous Verifier's failure.md for retry dispatch",
+    )
+    p_run.add_argument(
+        "--workflow",
+        help="Workflow name override; defaults to task's 'workflow:' field or 'ship-feature'.",
     )
 
     args = parser.parse_args()
